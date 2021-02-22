@@ -576,9 +576,12 @@ namespace SumData
             RoleGuid = clientEntry.RoleGuid;
         }
 
-        public int DayNumber { get;  }
         public DateTimeOffset Date {get;}
         public int Count { get; }
+
+        public int DayNumber { get;  }
+      
+ 
 
     }
 
@@ -597,21 +600,30 @@ namespace SumData
             DayInfo = new List<DayEntry>();
         }
 
-        public string IpAddress { get; }
-        public string AuthenticatedUserName { get; }
-        public string ClientName { get; }
-        public DateTimeOffset InsertDate { get; }
-        public DateTimeOffset LastAccess { get; }
+        public string RoleGuid { get;set; }
+        public string RoleDescription { get;set; }
 
-        public Guid TenantId { get; }
+        public string AuthenticatedUserName { get; }
 
         public int TotalAccesses { get; }
 
+        public DateTimeOffset InsertDate { get; }
+        public DateTimeOffset LastAccess { get; }
+
+        public string IpAddress { get; }
+     
+        public string ClientName { get; }
+
+
+        public Guid TenantId { get; }
+
+  
+
         public List<DayEntry> DayInfo { get; }
 
+     
+
         public string SourceFile { get;set; }
-        public string RoleGuid { get;set; }
-        public string RoleDescription { get;set; }
 
         public override string ToString()
         {
@@ -674,11 +686,12 @@ namespace SumData
             SerialNumber = serialNumber;
         }
 
-        public Guid BiosGuid { get; }
         public Guid VmGuid { get; }
-
         public DateTimeOffset CreationTime { get; }
         public DateTimeOffset LastSeenActive { get; }
+
+        public Guid BiosGuid { get; }
+ 
 
         public string SerialNumber { get; }
 
@@ -701,14 +714,18 @@ namespace SumData
             RoleGuid = roleGuid;
         }
 
+        public Guid RoleGuid { get; }
+
+        public string RoleDescription { get;set; }
+
         public DateTimeOffset FirstSeen { get; }
         public DateTimeOffset LastSeen { get; }
 
-        public Guid RoleGuid { get; }
+ 
 
         public string SourceFile { get;set; }
 
-        public string RoleDescription { get;set; }
+       
 
         public override string ToString()
         {
@@ -724,10 +741,12 @@ namespace SumData
             Address = address;
             HostName = hostName;
         }
+        public string HostName { get; }
+      
+        public string Address { get; }
+      
 
         public DateTimeOffset LastSeen { get; }
-        public string Address { get; }
-        public string HostName { get; }
 
         public string SourceFile { get;set; }
 
@@ -764,8 +783,10 @@ namespace SumData
         }
 
         public Guid RoleGuid { get; internal set; }
-        public string ProductName { get; internal set; }
         public string RoleName { get; internal set; }
+
+        public string ProductName { get; internal set; }
+     
 
         public override string ToString()
         {
