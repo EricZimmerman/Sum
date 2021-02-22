@@ -172,8 +172,7 @@ namespace SumECmd
             sw.Start();
 
             _timestamp = DateTimeOffset.UtcNow;
-
-
+            
             Sum sd = null;
 
             try
@@ -191,11 +190,20 @@ namespace SumECmd
 
                 Console.WriteLine();
             }
+            catch (FileNotFoundException fe)
+            {
+                _logger.Error(fe.Message);
+                Console.WriteLine();
+                Environment.Exit(0);
+            }
             catch (Exception e)
             {
                 _logger.Error($"Error processing file! Message: {e.Message}.\r\n\r\nThis almost always means the database is dirty and must be repaired. This can be verified by running 'esentutl.exe /mh <dbname>.mdb' and examining the 'State' property");
                 Console.WriteLine();
                 _logger.Info("If the database is dirty, **make a copy of your files**, ensure all files in the directory are not Read-only, open a PowerShell session as an admin, and repair by using the following commands (change directories to the location of <dbname>.mdb first):\r\n\r\n'esentutl.exe /r svc /i'\r\n'esentutl.exe /p <dbname>.mdb'\r\n\r\n");
+
+                Console.WriteLine();
+
                 Environment.Exit(0);
             }
 
@@ -208,6 +216,13 @@ namespace SumECmd
             _logger.Info("");
 
             _logger.Warn("Exporting data...");
+
+            if (Directory.Exists(_fluentCommandLineParser.Object.CsvDirectory) == false)
+            {
+                Directory.CreateDirectory(_fluentCommandLineParser.Object.CsvDirectory);
+            }
+
+
             ExportSystemIdentity(sd);
             ExportSystemRole(sd);
             ExportChainedDb(sd);
@@ -226,7 +241,7 @@ namespace SumECmd
         private static CsvWriter GetCsvWriter(string tableName)
         {
             var outName = $"{_timestamp:yyyyMMddHHmmss}_SumECmd_DETAIL_{tableName}_Output.csv";
-
+            
             var outFile = Path.Combine(_fluentCommandLineParser.Object.CsvDirectory, outName);
 
             _logger.Debug($"Setting up {tableName} output file: '{outFile}'");
