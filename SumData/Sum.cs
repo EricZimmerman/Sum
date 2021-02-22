@@ -57,6 +57,7 @@ namespace SumData
                 throw new FileNotFoundException($"File '{currentDb}' not found!");
             }
 
+            _logger.Info($"Found '{currentDb}'. Processing...");
             ProcessDatabase(currentDb,DateTime.Now.Year);
 
             foreach (var chainedDbInfo in ChainedDbs)
@@ -65,10 +66,11 @@ namespace SumData
 
                 if (File.Exists(chainFile) == false)
                 {
-                    _logger.Warn($"Chained database '{chainFile}' does not exist! Skipping...");
+                    _logger.Warn($"Chained database '{chainFile}' for year {chainedDbInfo.Year} does not exist! Skipping...");
                     continue;
                 }
                 
+                _logger.Info($"Found '{chainFile}' for year {chainedDbInfo.Year}. Processing...");
                 ProcessDatabase(chainFile,chainedDbInfo.Year);
             }
         }
@@ -156,6 +158,8 @@ namespace SumData
                     }
 
                     chainedDb.Clients[roleGuid.Value].Add(ce);
+
+                     _logger.Trace($"Added client info: {ce}");
                 }
 
                 Api.JetResetTableSequential(session, rolesTable, ResetTableSequentialGrbit.None);
@@ -185,6 +189,7 @@ namespace SumData
                   var dns = new DnsEntry(lastSeen,address,hostName);
 
                     chainedDb.DnsInfo.Add(dns);
+                    _logger.Trace($"Added DNS info: {dns}");
                 }
 
                 Api.JetResetTableSequential(session, dnsTable, ResetTableSequentialGrbit.None);
@@ -218,6 +223,7 @@ namespace SumData
                     var re = new RoleAccessEntry(firstSeen, lastSeen, roleGuid.Value);
 
                     chainedDb.RoleAccesses.Add(re);
+                    _logger.Trace($"Added role access info: {re}");
                 }
 
                 Api.JetResetTableSequential(session, rolesTable, ResetTableSequentialGrbit.None);
@@ -253,6 +259,8 @@ namespace SumData
                     var vm = new VmEntry(biosGuid.Value, vmGuid.Value, creationTime, lastSeenActive, serialNumber);
 
                     chainedDb.VmInfo.Add(vm);
+
+                    _logger.Trace($"Added VM info: {vm}");
                 }
 
                 Api.JetResetTableSequential(session, vmTable, ResetTableSequentialGrbit.None);
@@ -372,6 +380,8 @@ namespace SumData
                 var cd = new ChainedDbInfo(year.Value, fileName);
 
                 ChainedDbs.Add(cd);
+
+                _logger.Trace($"Added chained db info: {cd}");
             }
 
             Api.JetResetTableSequential(session, rolesTable, ResetTableSequentialGrbit.None);
@@ -394,6 +404,8 @@ namespace SumData
                 var ri = new RoleInfo(roleGuid.Value, prodName, roleName);
 
                 RoleInfos.Add(ri);
+
+                _logger.Trace($"Added role info: {ri}");
             }
 
             Api.JetResetTableSequential(session, rolesTable, ResetTableSequentialGrbit.None);
@@ -420,6 +432,8 @@ namespace SumData
                 var si = new SystemIdentInfo(creationTime.ToUniversalTime(), osMajor.Value, osMinor.Value, osBuildNum.Value);
 
                 SystemIdentityInfos.Add(si);
+
+                _logger.Trace($"Added system identity info: {si}");
             }
 
             Api.JetResetTableSequential(session, systemIdent, ResetTableSequentialGrbit.None);
@@ -469,7 +483,6 @@ namespace SumData
         }
 
         public string FileName {get;set;}
-
 
         public List<DnsEntry> DnsInfo { get; }
         public List<RoleAccessEntry> RoleAccesses { get; }
@@ -551,6 +564,24 @@ namespace SumData
         }
     }
 
+    public class ClientEntryDayDetail:ClientEntry
+    {
+        public ClientEntryDayDetail(ClientEntry clientEntry,DayEntry dayEntry) : base(clientEntry.IpAddress, clientEntry.AuthenticatedUserName, clientEntry.ClientName, clientEntry.InsertDate, clientEntry.LastAccess, clientEntry.TenantId, clientEntry.TotalAccesses)
+        {
+            DayNumber = dayEntry.DayNumber;
+            Date = dayEntry.Date;
+            Count = dayEntry.Count;
+            SourceFile = clientEntry.SourceFile;
+            RoleDescription = clientEntry.RoleDescription;
+            RoleGuid = clientEntry.RoleGuid;
+        }
+
+        public int DayNumber { get;  }
+        public DateTimeOffset Date {get;}
+        public int Count { get; }
+
+    }
+
     public class ClientEntry
     {
         public ClientEntry(string ipAddress, string authenticatedUserName, string clientName, DateTimeOffset insertDate, DateTimeOffset lastAccess, Guid tenantId, int totalAccesses)
@@ -577,6 +608,10 @@ namespace SumData
         public int TotalAccesses { get; }
 
         public List<DayEntry> DayInfo { get; }
+
+        public string SourceFile { get;set; }
+        public string RoleGuid { get;set; }
+        public string RoleDescription { get;set; }
 
         public override string ToString()
         {
@@ -647,11 +682,15 @@ namespace SumData
 
         public string SerialNumber { get; }
 
+        public string SourceFile { get;set; }
+
         public override string ToString()
         {
             return $"VM Guid: {VmGuid} Created: {CreationTime:yyyy-MM-dd HH:mm:ss.fffffff} Last Seen: {LastSeenActive:yyyy-MM-dd HH:mm:ss.fffffff} BIOS Guid: {BiosGuid}";
         }
     }
+
+    
 
     public class RoleAccessEntry
     {
@@ -666,6 +705,10 @@ namespace SumData
         public DateTimeOffset LastSeen { get; }
 
         public Guid RoleGuid { get; }
+
+        public string SourceFile { get;set; }
+
+        public string RoleDescription { get;set; }
 
         public override string ToString()
         {
@@ -685,6 +728,8 @@ namespace SumData
         public DateTimeOffset LastSeen { get; }
         public string Address { get; }
         public string HostName { get; }
+
+        public string SourceFile { get;set; }
 
         public override string ToString()
         {

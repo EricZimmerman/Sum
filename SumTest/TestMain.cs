@@ -18,7 +18,7 @@ namespace SumTest
         public void Testing2()
         {
             var config = new LoggingConfiguration();
-            var loglevel = LogLevel.Debug;
+            var loglevel = LogLevel.Info;
 
             var layout = @"${level}: ${message}";
 

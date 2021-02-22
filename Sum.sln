@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SumData", "SumData\SumData.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SumTest", "SumTest\SumTest.csproj", "{3285FF0D-C2C4-467D-9417-A55C914B8BAE}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SumECmd", "SumECmd\SumECmd.csproj", "{61EDA16B-F4CA-497C-98D5-D8170E4A625C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{3285FF0D-C2C4-467D-9417-A55C914B8BAE}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3285FF0D-C2C4-467D-9417-A55C914B8BAE}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3285FF0D-C2C4-467D-9417-A55C914B8BAE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{61EDA16B-F4CA-497C-98D5-D8170E4A625C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{61EDA16B-F4CA-497C-98D5-D8170E4A625C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{61EDA16B-F4CA-497C-98D5-D8170E4A625C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{61EDA16B-F4CA-497C-98D5-D8170E4A625C}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
