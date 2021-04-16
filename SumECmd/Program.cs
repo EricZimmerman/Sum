@@ -356,7 +356,7 @@ namespace SumECmd
                     }
                     roleAccess.SourceFile = Path.GetFileName(sdProcessedDatabase.FileName);
 
-                    var roleDesc = sd.RoleInfos.SingleOrDefault(t => t.RoleGuid == roleAccess.RoleGuid);
+                    var roleDesc = sd.RoleInfos.FirstOrDefault(t => t.RoleGuid == roleAccess.RoleGuid);
 
                     roleAccess.RoleDescription = roleDesc != null ? roleDesc.RoleName : "(Unknown Role Guid)";
 
