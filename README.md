@@ -30,7 +30,7 @@ Process Microsoft User Access Logs! Thanks to KPMG for the initial write up, fou
 
 ## Repairing the SUM Database
 
-Until a proper guide can be made with test data, follow the guide for repairing the SRUM database found [here](https://github.com/EricZimmerman/Srum). Both the SUM and SRUM databases are ESE so the process will be identical.
+Until a proper guide can be made with test data, follow the guide for repairing the SRUM database found [here](https://github.com/EricZimmerman/Srum). Both the SUM and SRUM databases are ESE so the process will be identical. Additionally, a walkthrough on how to repair the SUM database was included in [this](https://svch0st.medium.com/windows-user-access-logs-ual-9580f1100635) blog post.
 
 # Download Eric Zimmerman's Tools
 
