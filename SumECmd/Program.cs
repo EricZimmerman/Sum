@@ -77,7 +77,7 @@ internal class Program
         {
             new Option<string>(
                 "-d",
-                "Directory to recursively process, looking for SystemIdentity.mdb, Current.mdb, etc. Required.\r\n"),
+                "Directory to process, looking for SystemIdentity.mdb, Current.mdb, etc. Required.\r\n"),
                 
             new Option<string>(
                 "--csv",
@@ -85,7 +85,7 @@ internal class Program
                 
             new Option<bool>("--wd",
                 getDefaultValue:()=>true,
-                "Generate CSV with day level details. Default is TRUE\r\n"),
+                "Generate CSV with day level details. Default is TRUE"),
             
             new Option<string>(
                 "--dt",
