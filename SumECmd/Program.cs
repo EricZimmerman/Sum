@@ -12,9 +12,10 @@ using System.Text;
 using System.Threading.Tasks;
 using CsvHelper;
 using Exceptionless;
-using NLog;
-using NLog.Config;
-using NLog.Targets;
+using Exceptionless.Logging;
+using Serilog;
+using Serilog.Core;
+using Serilog.Events;
 using ServiceStack;
 using SumData;
 
@@ -35,7 +36,6 @@ public class ApplicationArguments
 
 internal class Program
 {
-    private static Logger _logger;
     
     private static readonly string BaseDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
     private static DateTimeOffset _timestamp;
@@ -48,7 +48,7 @@ internal class Program
 
     private static readonly string Footer = @"Examples: SumECmd.exe -d ""C:\Temp\sum"" --csv ""C:\Temp\"" " + "\r\n\t " +
                                             "\r\n\t" +
-                                            "  Short options (single letter) are prefixed with a single dash. Long commands are prefixed with two dashes\r\n";
+                                            "     Short options (single letter) are prefixed with a single dash. Long commands are prefixed with two dashes\r\n";
 
     private static RootCommand _rootCommand;
     private static string[] _args;
@@ -70,11 +70,8 @@ internal class Program
     {
         ExceptionlessClient.Default.Startup("3DWn5we5zp92pJRvMetSThai8YZCuJQf7Lx3ssLl");
 
-        SetupNLog();
-
         _args = args;
 
-        _logger = LogManager.GetCurrentClassLogger();
 
         _rootCommand = new RootCommand
         {
@@ -112,11 +109,42 @@ internal class Program
         _rootCommand.Handler = System.CommandLine.NamingConventionBinder.CommandHandler.Create<string,string,bool,string, bool,bool>(DoWork);
         
         await _rootCommand.InvokeAsync(args);
+        
+        Log.CloseAndFlush();
     }
 
     private static void DoWork(string d, string csv,bool wd, string dt, bool debug, bool trace)
     {
+        var levelSwitch = new LoggingLevelSwitch();
+
+        var template = "{Message:lj}{NewLine}{Exception}";
+
+        if (debug)
+        {
+            levelSwitch.MinimumLevel = LogEventLevel.Debug;
+            template = "[{Timestamp:HH:mm:ss.fff} {Level:u3}] {Message:lj}{NewLine}{Exception}";
+        }
+
+        if (trace)
+        {
+            levelSwitch.MinimumLevel = LogEventLevel.Verbose;
+            template = "[{Timestamp:HH:mm:ss.fff} {Level:u3}] {Message:lj}{NewLine}{Exception}";
+        }
         
+        var conf = new LoggerConfiguration()
+            .WriteTo.Console(outputTemplate: template)
+            .MinimumLevel.ControlledBy(levelSwitch);
+      
+        Log.Logger = conf.CreateLogger();
+        
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            Console.WriteLine();
+            Log.Fatal("Non-Windows platforms not supported due to the need to load ESI specific Windows libraries! Exiting...");
+            Console.WriteLine();
+            Environment.Exit(0);
+            return;
+        }
      
 
         if (d.IsNullOrEmpty())
@@ -127,7 +155,8 @@ internal class Program
 
             helpBld.Write(hc);
                     
-            _logger.Warn("-d is required. Exiting\r\n");
+            Log.Warning("-d is required. Exiting");
+            Console.WriteLine();
             return;
         }
 
@@ -135,7 +164,8 @@ internal class Program
         if (d.IsNullOrEmpty() == false &&
             !Directory.Exists(d))
         {
-            _logger.Warn($"Directory '{d}' not found. Exiting");
+            Log.Warning("Directory '{D}' not found. Exiting",d);
+            Console.WriteLine();
             return;
         }
 
@@ -147,30 +177,21 @@ internal class Program
 
             helpBld.Write(hc);
 
-            _logger.Warn("--csv is required. Exiting\r\n");
+            Log.Warning("--csv is required. Exiting");
+            Console.WriteLine();
             return;
         }
 
-        _logger.Info(Header);
-        _logger.Info("");
-        _logger.Info($"Command line: {string.Join(" ", _args)}\r\n");
+        Log.Information("{Header}",Header);
+        Console.WriteLine();
+        Log.Information("Command line: {Args}",string.Join(" ", _args));
+        Console.WriteLine();
 
         if (IsAdministrator() == false)
         {
-            _logger.Fatal("Warning: Administrator privileges not found!\r\n");
+            Log.Warning("Warning: Administrator privileges not found!");
+            Console.WriteLine();
         }
-
-        if (debug)
-        {
-            LogManager.Configuration.LoggingRules.First().EnableLoggingForLevel(LogLevel.Debug);
-        }
-
-        if (trace)
-        {
-            LogManager.Configuration.LoggingRules.First().EnableLoggingForLevel(LogLevel.Trace);
-        }
-
-        LogManager.ReconfigExistingLoggers();
 
         var sw = new Stopwatch();
         sw.Start();
@@ -181,45 +202,47 @@ internal class Program
 
         try
         {
-            _logger.Info($"Processing '{d}'...\r\n");
+            Log.Information("Processing '{D}'...",d);
+            Console.WriteLine();
             sd = new Sum(d);
+            Console.WriteLine();
+            Log.Information("Processing complete!");
+            Console.WriteLine();
+            Log.Information("Summary info:");
 
-            _logger.Warn("\r\nProcessing complete!\r\n");
-            _logger.Warn("Summary info:");
-
-            _logger.Info($"{"Role info count:".PadRight(30)} {sd.RoleInfos.Count:N0}");
-            _logger.Info($"{"System Identity info count:".PadRight(30)} {sd.SystemIdentityInfos.Count:N0}");
-            _logger.Info($"{"Chained DB info count:".PadRight(30)} {sd.ChainedDbs.Count:N0}");
-            _logger.Info($"{"Processed DB info count:".PadRight(30)} {sd.ProcessedDatabases.Count:N0}");
+            Log.Information("{Role} {RoleInfosCount:N0}","Role info count:".PadRight(30),sd.RoleInfos.Count);
+            Log.Information("{SystemIdentity} {SystemIdentityInfosCount:N0}","System Identity info count:".PadRight(30),sd.SystemIdentityInfos.Count);
+            Log.Information("{ChainedDb} {ChainedDbsCount:N0}","Chained DB info count:".PadRight(30),sd.ChainedDbs.Count);
+            Log.Information("{ProcessedDb} {ProcessedDatabasesCount:N0}","Processed DB info count:".PadRight(30),sd.ProcessedDatabases.Count);
 
             Console.WriteLine();
         }
         catch (FileNotFoundException fe)
         {
-            _logger.Error(fe.Message);
+            Log.Error(fe,"File not found: {Message}",fe.Message);
             Console.WriteLine();
             Environment.Exit(0);
         }
         catch (Exception e)
         {
-            _logger.Error($"Error processing file! Message: {e.Message}.\r\n\r\nThis almost always means the database is dirty and must be repaired. This can be verified by running 'esentutl.exe /mh <dbname>.mdb' and examining the 'State' property");
+            Log.Error(e,"Error processing file! Message: {Message}.\r\n\r\nThis almost always means the database is dirty and must be repaired. This can be verified by running 'esentutl.exe /mh <dbname>.mdb' and examining the 'State' property",e.Message);
             Console.WriteLine();
-            _logger.Info("If the database is dirty, **make a copy of your files**, ensure all files in the directory are not Read-only, open a PowerShell session as an admin, and repair by using the following commands (change directories to the location of <dbname>.mdb first):\r\n\r\n'esentutl.exe /r svc /i'\r\n'esentutl.exe /p <dbname>.mdb'\r\n\r\n");
+            Log.Information("If the database is dirty, **make a copy of your files**, ensure all files in the directory are not Read-only, open a PowerShell session as an admin, and repair by using the following commands (change directories to the location of <dbname>.mdb first):\r\n\r\n'esentutl.exe /r svc /i'\r\n'esentutl.exe /p <dbname>.mdb'\r\n\r\n");
 
             Console.WriteLine();
 
             Environment.Exit(0);
         }
 
-        _logger.Warn("The following databases were processed:");
+        Log.Information("The following databases were processed:");
         foreach (var sdProcessedDatabase in sd.ProcessedDatabases)
         {
-            _logger.Info($"\t{sdProcessedDatabase.FileName}");
+            Log.Information("\t{FileName}",sdProcessedDatabase.FileName);
         }
 
-        _logger.Info("");
+        Console.WriteLine();
 
-        _logger.Warn("Exporting data...");
+        Log.Information("Exporting data...");
 
         if (Directory.Exists(csv) == false)
         {
@@ -233,10 +256,10 @@ internal class Program
 
         sw.Stop();
 
-        _logger.Info("");
+        Console.WriteLine();
 
-        _logger.Error(
-            $"Processing completed in {sw.Elapsed.TotalSeconds:N4} seconds\r\n");
+        Log.Information("Processing completed in {TotalSeconds:N4} seconds",sw.Elapsed.TotalSeconds);
+        Console.WriteLine();
     }
 
     private static CsvWriter GetCsvWriter(string tableName, string csv)
@@ -245,7 +268,7 @@ internal class Program
             
         var outFile = Path.Combine(csv, outName);
 
-        _logger.Debug($"Setting up {tableName} output file: '{outFile}'");
+        Log.Debug("Setting up {TableName} output file: '{OutFile}'",tableName,outFile);
 
         var swCsv = new StreamWriter(outFile, false, Encoding.UTF8);
 
@@ -264,7 +287,7 @@ internal class Program
 
         foreach (var sdProcessedDatabase in sd.ProcessedDatabases)
         {
-            _logger.Info($"Exporting Client info from '{Path.GetFileName(sdProcessedDatabase.FileName)}'...");
+            Log.Information("Exporting Client info from '{FileName}'...",Path.GetFileName(sdProcessedDatabase.FileName));
             foreach (var client in sdProcessedDatabase.Clients)
             {
                 foreach (var clientEntry in client.Value)
@@ -318,7 +341,7 @@ internal class Program
 
             if (sdProcessedDatabase.DnsInfo.Any())
             {
-                _logger.Info($"Exporting DNS info from '{Path.GetFileName(sdProcessedDatabase.FileName)}'...");
+                Log.Information("Exporting DNS info from '{FileName}'...",Path.GetFileName(sdProcessedDatabase.FileName));
             }
             foreach (var dnsEntry in sdProcessedDatabase.DnsInfo)
             {
@@ -340,7 +363,7 @@ internal class Program
 
             if (sdProcessedDatabase.RoleAccesses.Any())
             {
-                _logger.Info($"Exporting Role access info from '{Path.GetFileName(sdProcessedDatabase.FileName)}'...");
+                Log.Information("Exporting Role access info from '{FileName}'...",Path.GetFileName(sdProcessedDatabase.FileName));
             }
             foreach (var roleAccess in sdProcessedDatabase.RoleAccesses)
             {
@@ -367,7 +390,7 @@ internal class Program
 
             if (sdProcessedDatabase.VmInfo.Any())
             {
-                _logger.Info($"Exporting Vm info from '{Path.GetFileName(sdProcessedDatabase.FileName)}'...");
+                Log.Information("Exporting Vm info from '{FileName}'...",Path.GetFileName(sdProcessedDatabase.FileName));
             }
             foreach (var vm in sdProcessedDatabase.VmInfo)
             {
@@ -386,7 +409,7 @@ internal class Program
                 csvWriterVm.NextRecord();
             }
 
-            _logger.Info("-----------------------------------------------------------------------------------------------------");
+            Log.Information("-----------------------------------------------------------------------------------------------------");
         }
 
         csvWriterClients?.Flush();
@@ -395,33 +418,34 @@ internal class Program
         csvWriterRoles?.Flush();
         csvWriterClientsDetail?.Flush();
 
-        _logger.Warn("\r\nExport totals");
+        Console.WriteLine();
+        Log.Information("Export totals");
 
         if (csvWriterClients != null)
         {
-            _logger.Info($"Found {csvWriterClients.Row - 2:N0} Client entries");
+            Log.Information("Found {Rows:N0} Client entries",csvWriterClients.Row - 2);
         }
 
         if (csvWriterClientsDetail != null)
         {
-            _logger.Info($"Found {csvWriterClientsDetail.Row - 2:N0} Client detail entries");
+            Log.Information("Found {Rows:N0} Client detail entries",csvWriterClientsDetail.Row - 2);
         }
 
         if (csvWriterDns != null)
         {
-            _logger.Info($"Found {csvWriterDns.Row - 2:N0} DNS entries");
+            Log.Information("Found {Rows:N0} DNS entries",csvWriterDns.Row - 2);
         }
 
 
         if (csvWriterRoles != null)
         {
-            _logger.Info($"Found {csvWriterRoles.Row - 2:N0} Role entries");
+            Log.Information("Found {Rows:N0} Role entries",csvWriterRoles.Row - 2);
         }
          
 
         if (csvWriterVm != null)
         {
-            _logger.Info($"Found {csvWriterVm.Row - 2:N0} VM entries");
+            Log.Information("Found {Rows:N0} VM entries",csvWriterVm.Row - 2);
         }
     }
 
@@ -450,7 +474,7 @@ internal class Program
         }
         catch (Exception e)
         {
-            _logger.Error($"Error exporting 'SystemIdentInfo' data! Error: {e.Message}");
+            Log.Error(e,"Error exporting 'SystemIdentInfo' data! Error: {Message}",e.Message);
         }
     }
 
@@ -479,7 +503,7 @@ internal class Program
         }
         catch (Exception e)
         {
-            _logger.Error($"Error exporting 'SystemIdentInfo' data! Error: {e.Message}");
+            Log.Error(e,"Error exporting 'SystemIdentInfo' data! Error: {Message}",e.Message);
         }
     }
 
@@ -510,32 +534,10 @@ internal class Program
         }
         catch (Exception e)
         {
-            _logger.Error($"Error exporting 'SystemIdentInfo' data! Error: {e.Message}");
+            Log.Error(e,"Error exporting 'SystemIdentInfo' data! Error: {Message}",e.Message);
         }
     }
 
 
-    private static void SetupNLog()
-    {
-        if (File.Exists(Path.Combine(BaseDirectory, "Nlog.config")))
-        {
-            return;
-        }
-
-        var config = new LoggingConfiguration();
-        var loglevel = LogLevel.Info;
-
-        var layout = @"${message}";
-
-        var consoleTarget = new ColoredConsoleTarget();
-
-        config.AddTarget("console", consoleTarget);
-
-        consoleTarget.Layout = layout;
-
-        var rule1 = new LoggingRule("*", loglevel, consoleTarget);
-        config.LoggingRules.Add(rule1);
-
-        LogManager.Configuration = config;
-    }
+  
 }

@@ -1,8 +1,7 @@
 ﻿using System;
-using NLog;
-using NLog.Config;
-using NLog.Targets;
+
 using NUnit.Framework;
+using Serilog;
 using SumData;
 
 namespace SumTest;
@@ -17,28 +16,17 @@ public class TestMain
     [Test]
     public void Testing2()
     {
-        var config = new LoggingConfiguration();
-        var loglevel = LogLevel.Info;
-
-        var layout = @"${level}: ${message}";
-
-        var consoleTarget = new ColoredConsoleTarget();
-
-        config.AddTarget("console", consoleTarget);
-
-        consoleTarget.Layout = layout;
-
-        var rule1 = new LoggingRule("*", loglevel, consoleTarget);
-        config.LoggingRules.Add(rule1);
-
-        LogManager.Configuration = config;
+        Log.Logger = new LoggerConfiguration()
+            .WriteTo.Console()
+            .MinimumLevel.Information()
+            .CreateLogger();
 
         //var r = new Srum(@"D:\OneDrive\HPSpectreSrum\Windows\System32\SRU\SRUDB.dat",@"D:\OneDrive\HPSpectreSrum\Windows\System32\config\SOFTWARE");
 
         //  Sum.DumpTableInfo(@"C:\Temp\tout\c\Windows\System32\LogFiles\Sum\Current.mdb");
 
 
-        var l = LogManager.GetCurrentClassLogger();
+       
 
         try
         {
@@ -46,31 +34,31 @@ public class TestMain
                 
             Console.WriteLine();
 
-            l.Fatal("SYSTEM IDENTITY INFO");
+            Log.Fatal("SYSTEM IDENTITY INFO");
             foreach (var rSystemIdentityInfo in r.SystemIdentityInfos)
             {
-                l.Info(rSystemIdentityInfo);
+                Log.Information("{SystemIdentityInfo}",rSystemIdentityInfo);
             }
             Console.WriteLine();
 
-            l.Fatal("SYSTEM ROLE INFO");
+            Log.Fatal("SYSTEM ROLE INFO");
             foreach (var rRole in r.RoleInfos)
             {
-                l.Info(rRole);
+                Log.Information("Role",rRole);
             }
             Console.WriteLine();
 
-            l.Fatal("SYSTEM CHAINED DATABASE INFO");
+            Log.Fatal("SYSTEM CHAINED DATABASE INFO");
             foreach (var chained in r.ChainedDbs)
             {
-                l.Info(chained);
+                Log.Information("{Chained}",chained);
             }
             Console.WriteLine();
 
-            l.Fatal("PROCESSED DATABASE INFO");
+            Log.Fatal("PROCESSED DATABASE INFO");
             foreach (var processed in r.ProcessedDatabases)
             {
-                l.Info(processed);
+                Log.Information("{Processed}",processed);
             }
 
             Console.WriteLine("____________________________-------------------------------------____________________________");
@@ -87,28 +75,17 @@ public class TestMain
     [Test]
     public void Testing()
     {
-        var config = new LoggingConfiguration();
-        var loglevel = LogLevel.Debug;
-
-        var layout = @"${level}: ${message}";
-
-        var consoleTarget = new ColoredConsoleTarget();
-
-        config.AddTarget("console", consoleTarget);
-
-        consoleTarget.Layout = layout;
-
-        var rule1 = new LoggingRule("*", loglevel, consoleTarget);
-        config.LoggingRules.Add(rule1);
-
-        LogManager.Configuration = config;
+      
+        Log.Logger = new LoggerConfiguration()
+            .WriteTo.Console()
+            .MinimumLevel.Information()
+            .CreateLogger();
 
         //var r = new Srum(@"D:\OneDrive\HPSpectreSrum\Windows\System32\SRU\SRUDB.dat",@"D:\OneDrive\HPSpectreSrum\Windows\System32\config\SOFTWARE");
 
         //  Sum.DumpTableInfo(@"C:\Temp\tout\c\Windows\System32\LogFiles\Sum\Current.mdb");
 
-
-        var l = LogManager.GetCurrentClassLogger();
+        
 
         try
         {
@@ -116,31 +93,31 @@ public class TestMain
                 
             Console.WriteLine();
 
-            l.Fatal("SYSTEM IDENTITY INFO");
+            Log.Fatal("SYSTEM IDENTITY INFO");
             foreach (var rSystemIdentityInfo in r.SystemIdentityInfos)
             {
-                l.Info(rSystemIdentityInfo);
+                Log.Information("{Thing}",rSystemIdentityInfo);
             }
             Console.WriteLine();
 
-            l.Fatal("SYSTEM ROLE INFO");
+            Log.Fatal("SYSTEM ROLE INFO");
             foreach (var rRole in r.RoleInfos)
             {
-                l.Info(rRole);
+                Log.Information("{Thing}",rRole);
             }
             Console.WriteLine();
 
-            l.Fatal("SYSTEM CHAINED DATABASE INFO");
+            Log.Fatal("SYSTEM CHAINED DATABASE INFO");
             foreach (var chained in r.ChainedDbs)
             {
-                l.Info(chained);
+                Log.Information("{Thing}",chained);
             }
             Console.WriteLine();
 
-            l.Fatal("PROCESSED DATABASE INFO");
+            Log.Fatal("PROCESSED DATABASE INFO");
             foreach (var processed in r.ProcessedDatabases)
             {
-                l.Info(processed);
+                Log.Information("{Processed}",processed);
             }
 
             Console.WriteLine("____________________________-------------------------------------____________________________");

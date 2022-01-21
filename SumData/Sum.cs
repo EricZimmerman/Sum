@@ -5,14 +5,13 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using Microsoft.Isam.Esent.Interop;
-using NLog;
+using Serilog;
+
 
 namespace SumData
 {
     public class Sum
     {
-        private static readonly Logger _logger = LogManager.GetCurrentClassLogger();
-
         public Sum(string directory)
         {
             //https://docs.microsoft.com/en-us/previous-versions/windows/desktop/ual/msftual-hyperv
@@ -46,7 +45,7 @@ namespace SumData
                 throw new FileNotFoundException($"File '{sysIdent}' not found!");
             }
 
-            _logger.Info($"Found '{sysIdent}'. Processing...");
+            Log.Information("Found '{SysIdent}'. Processing...",sysIdent);
 
             ProcessSystemIdentityDatabase(sysIdent);
 
@@ -56,8 +55,8 @@ namespace SumData
             {
                 throw new FileNotFoundException($"File '{currentDb}' not found!");
             }
-
-            _logger.Info($"Found '{currentDb}'. Processing...");
+          
+            Log.Information("Found '{CurrentDb}'. Processing...",currentDb);
             ProcessDatabase(currentDb,DateTime.Now.Year);
 
             foreach (var chainedDbInfo in ChainedDbs)
@@ -66,11 +65,11 @@ namespace SumData
 
                 if (File.Exists(chainFile) == false)
                 {
-                    _logger.Warn($"Chained database '{chainFile}' for year {chainedDbInfo.Year} does not exist! Skipping...");
+                    Log.Information("Chained database '{ChainFile}' for year {Year} does not exist! Skipping...",chainFile,chainedDbInfo.Year);
                     continue;
                 }
                 
-                _logger.Info($"Found '{chainFile}' for year {chainedDbInfo.Year}. Processing...");
+                Log.Information("Found '{ChainFile}' for year {Year}. Processing...",chainFile,chainedDbInfo.Year);
                 ProcessDatabase(chainFile,chainedDbInfo.Year);
             }
         }
@@ -106,12 +105,12 @@ namespace SumData
 
             var chainedDb = new ChainedDatabase(dbFile);
 
-            _logger.Debug($"Setting up dbFile session for '{dbFile}'");
+            Log.Debug("Setting up dbFile session for '{DbFile}'",dbFile);
             using var session = new Session(instance);
             Api.JetAttachDatabase(session, dbFile, AttachDatabaseGrbit.ReadOnly);
             Api.JetOpenDatabase(session, dbFile, null, out var dbid, OpenDatabaseGrbit.ReadOnly);
             
-            _logger.Debug("Getting Clients info");
+            Log.Debug("Getting Clients info");
             try
             {
                 using var rolesTable = new Table(session, dbid, "CLIENTS", OpenTableGrbit.ReadOnly);
@@ -159,17 +158,17 @@ namespace SumData
 
                     chainedDb.Clients[roleGuid.Value].Add(ce);
 
-                     _logger.Trace($"Added client info: {ce}");
+                     Log.Verbose("Added client info: {Ce}",ce);
                 }
 
                 Api.JetResetTableSequential(session, rolesTable, ResetTableSequentialGrbit.None);
             }
             catch (Exception e)
             {
-                _logger.Error($"Error processing Clients info: {e.Message} {e.StackTrace}");
+                Log.Error(e,"Error processing Clients info: {Message}",e.Message);
             }
 
-            _logger.Debug("Getting DNS info");
+            Log.Debug("Getting DNS info");
             try
             {
                 using var dnsTable = new Table(session, dbid, "DNS", OpenTableGrbit.ReadOnly);
@@ -189,7 +188,7 @@ namespace SumData
                   var dns = new DnsEntry(lastSeen,address,hostName);
 
                     chainedDb.DnsInfo.Add(dns);
-                    _logger.Trace($"Added DNS info: {dns}");
+                    Log.Verbose("Added DNS info: {Dns}",dns);
                 }
 
                 Api.JetResetTableSequential(session, dnsTable, ResetTableSequentialGrbit.None);
@@ -197,11 +196,11 @@ namespace SumData
             }
             catch (Exception e)
             {
-                _logger.Error($"Error processing DNS info: {e.Message} {e.StackTrace}");
+                Log.Error(e,"Error processing DNS info: {Message}",e.Message);
             }
 
 
-            _logger.Debug("Getting Role Access info");
+            Log.Debug("Getting Role Access info");
             try
             {
                 using var rolesTable = new Table(session, dbid, "ROLE_ACCESS", OpenTableGrbit.ReadOnly);
@@ -223,7 +222,7 @@ namespace SumData
                     var re = new RoleAccessEntry(firstSeen, lastSeen, roleGuid.Value);
 
                     chainedDb.RoleAccesses.Add(re);
-                    _logger.Trace($"Added role access info: {re}");
+                    Log.Verbose("Added role access info: {Re}",re);
                 }
 
                 Api.JetResetTableSequential(session, rolesTable, ResetTableSequentialGrbit.None);
@@ -231,10 +230,10 @@ namespace SumData
             }
             catch (Exception e)
             {
-                _logger.Error($"Error processing Role Access info: {e.Message} {e.StackTrace}");
+                Log.Error(e,"Error processing Role Access info: {Message}",e.Message);
             }
 
-            _logger.Debug("Getting Virtual Machines info");
+            Log.Debug("Getting Virtual Machines info");
             try
             {
                 using var vmTable = new Table(session, dbid, "VIRTUALMACHINES", OpenTableGrbit.ReadOnly);
@@ -260,7 +259,7 @@ namespace SumData
 
                     chainedDb.VmInfo.Add(vm);
 
-                    _logger.Trace($"Added VM info: {vm}");
+                    Log.Verbose("Added VM info: {Vm}",vm);
                 }
 
                 Api.JetResetTableSequential(session, vmTable, ResetTableSequentialGrbit.None);
@@ -269,7 +268,7 @@ namespace SumData
             }
             catch (Exception e)
             {
-                _logger.Error($"Error processing Virtual Machine info: {e.Message} {e.StackTrace}");
+                Log.Error(e,"Error processing Virtual Machine info: {Message}",e.Message);
             }
      
 
@@ -327,40 +326,40 @@ namespace SumData
 
             instance.Init();
 
-            _logger.Debug("Setting up session for SystemIdentity");
+            Log.Debug("Setting up session for SystemIdentity");
             using var session = new Session(instance);
             Api.JetAttachDatabase(session, sysIdent, AttachDatabaseGrbit.ReadOnly);
             Api.JetOpenDatabase(session, sysIdent, null, out var dbid, OpenDatabaseGrbit.ReadOnly);
 
-            _logger.Debug("Getting System identity info");
+            Log.Debug("Getting System identity info");
             try
             {
                 GetSystemIdentityInfo(session, dbid);
             }
             catch (Exception e)
             {
-                _logger.Error($"Error processing System identity info: {e.Message}");
+                Log.Error(e,"Error processing System identity info: {Message}",e.Message);
             }
 
 
-            _logger.Debug("Getting Role Id info");
+            Log.Debug("Getting Role Id info");
             try
             {
                 GetRoleIdInfo(session, dbid);
             }
             catch (Exception e)
             {
-                _logger.Error($"Error Role IDs info: {e.Message}");
+                Log.Error(e,"Error Role IDs info: {Message}",e.Message);
             }
 
-            _logger.Debug("Getting Chained database info");
+            Log.Debug("Getting Chained database info");
             try
             {
                 GetChainedDatabaseInfo(session, dbid);
             }
             catch (Exception e)
             {
-                _logger.Error($"Error processing Chained Database info: {e.Message}");
+                Log.Error(e,"Error processing Chained Database info: {Message}",e.Message);
             }
         }
 
@@ -381,7 +380,7 @@ namespace SumData
 
                 ChainedDbs.Add(cd);
 
-                _logger.Trace($"Added chained db info: {cd}");
+                Log.Verbose("Added chained db info: {Cd}",cd);
             }
 
             Api.JetResetTableSequential(session, rolesTable, ResetTableSequentialGrbit.None);
@@ -405,7 +404,7 @@ namespace SumData
 
                 RoleInfos.Add(ri);
 
-                _logger.Trace($"Added role info: {ri}");
+                Log.Verbose("Added role info: {Ri}",ri);
             }
 
             Api.JetResetTableSequential(session, rolesTable, ResetTableSequentialGrbit.None);
@@ -433,7 +432,7 @@ namespace SumData
 
                 SystemIdentityInfos.Add(si);
 
-                _logger.Trace($"Added system identity info: {si}");
+                Log.Verbose("Added system identity info: {Si}",si);
             }
 
             Api.JetResetTableSequential(session, systemIdent, ResetTableSequentialGrbit.None);
