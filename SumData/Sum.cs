@@ -98,6 +98,7 @@ namespace SumData
             instance.Parameters.SystemDirectory = Path.GetDirectoryName(dbFile);
             //instance.Parameters.BaseName = "SRU";
             instance.Parameters.TempDirectory = Path.GetDirectoryName(dbFile);
+            instance.Parameters.EnableIndexCleanup = true;
 
             //instance.Parameters.Recovery = true;
 
@@ -107,7 +108,7 @@ namespace SumData
 
             Log.Debug("Setting up dbFile session for '{DbFile}'",dbFile);
             using var session = new Session(instance);
-            Api.JetAttachDatabase(session, dbFile, AttachDatabaseGrbit.ReadOnly);
+            Api.JetAttachDatabase(session, dbFile, AttachDatabaseGrbit.DeleteCorruptIndexes);
             Api.JetOpenDatabase(session, dbFile, null, out var dbid, OpenDatabaseGrbit.ReadOnly);
             
             Log.Debug("Getting Clients info");
