@@ -1,6 +1,7 @@
 ﻿using System;
 using System.CommandLine;
 using System.CommandLine.Help;
+using System.CommandLine.Invocation;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -34,6 +35,7 @@ public class ApplicationArguments
 }
 
 
+
 internal class Program
 {
     
@@ -65,6 +67,8 @@ internal class Program
         var principal = new WindowsPrincipal(identity);
         return principal.IsInRole(WindowsBuiltInRole.Administrator);
     }
+    
+   
 
     private static async Task Main(string[] args)
     {
@@ -72,43 +76,56 @@ internal class Program
 
         _args = args;
 
+        var dOpt = new Option<string>("-d")
+        {
+            Description = "Directory to process, looking for SystemIdentity.mdb, Current.mdb, etc. Required.\r\n"
+        };
+        
+        var csvOpt = new Option<string>("--csv")
+        {
+            Description = "Directory to save CSV formatted results to. Be sure to include the full path in double quotes\r\n"
+        };
+        
+        var wdOpt = new Option<bool>("--wd")
+        {
+            Description = "Generate CSV with day level details. Default is TRUE",
+            DefaultValueFactory = _ => true
+        };
+        
+        var dtOpt = new Option<string>("--dt")
+        {
+            Description = "The custom date/time format to use when displaying time stamps. See https://goo.gl/CNVq0k for options",
+            DefaultValueFactory = _ => "yyyy-MM-dd HH:mm:ss"
+        };
+        
+        var debugOpt = new Option<bool>("--debug")
+        {
+            Description = "Show debug information during processing",
+            DefaultValueFactory = _ => false
+        };
+        var traceOpt = new Option<bool>("--trace")
+        {
+            Description = "Show trace information during processing",
+            DefaultValueFactory = _ => false
+        };
 
         _rootCommand = new RootCommand
         {
-            new Option<string>(
-                "-d",
-                "Directory to process, looking for SystemIdentity.mdb, Current.mdb, etc. Required.\r\n"),
-                
-            new Option<string>(
-                "--csv",
-                "Directory to save CSV formatted results to. Be sure to include the full path in double quotes\r\n"),
-                
-            new Option<bool>("--wd",
-                getDefaultValue:()=>true,
-                "Generate CSV with day level details. Default is TRUE"),
-            
-            new Option<string>(
-                "--dt",
-                getDefaultValue:()=>"yyyy-MM-dd HH:mm:ss",
-                "The custom date/time format to use when displaying time stamps. See https://goo.gl/CNVq0k for options"),
-            
-            new Option<bool>(
-                "--debug",
-                getDefaultValue:()=>false,
-                "Show debug information during processing"),
-            
-            new Option<bool>(
-                "--trace",
-                getDefaultValue:()=>false,
-                "Show trace information during processing"),
-                
+           dOpt,
+           csvOpt,
+           wdOpt,
+           dtOpt,
+           debugOpt,
+           traceOpt
+           
         };
             
         _rootCommand.Description = Header + "\r\n\r\n" + Footer;
 
-        _rootCommand.Handler = System.CommandLine.NamingConventionBinder.CommandHandler.Create<string,string,bool,string, bool,bool>(DoWork);
+        _rootCommand.SetAction(result => DoWork(result.GetValue(dOpt), result.GetValue(csvOpt), result.GetValue(wdOpt),
+            result.GetValue(dtOpt), result.GetValue(debugOpt), result.GetValue(traceOpt)));
         
-        await _rootCommand.InvokeAsync(args);
+        var foo = _rootCommand.Parse(args).InvokeAsync();
         
         Log.CloseAndFlush();
     }
@@ -145,21 +162,15 @@ internal class Program
             Environment.Exit(0);
             return;
         }
-     
 
         if (d.IsNullOrEmpty())
         {
-            var helpBld = new HelpBuilder(LocalizationResources.Instance, Console.WindowWidth);
-                    
-            var hc = new HelpContext(helpBld,_rootCommand,Console.Out);
-
-            helpBld.Write(hc);
-                    
-            Log.Warning("-d is required. Exiting");
+            var aaa = new CustomHelpAction(new HelpAction());
+            aaa.Invoke(_rootCommand.Parse("-d is required. Exiting"));
+            
             Console.WriteLine();
             return;
         }
-
 
         if (d.IsNullOrEmpty() == false &&
             !Directory.Exists(d))
@@ -171,13 +182,9 @@ internal class Program
 
         if (csv.IsNullOrEmpty())
         {
-            var helpBld = new HelpBuilder(LocalizationResources.Instance, Console.WindowWidth);
-                    
-            var hc = new HelpContext(helpBld,_rootCommand,Console.Out);
-
-            helpBld.Write(hc);
-
-            Log.Warning("--csv is required. Exiting");
+            var aaa = new CustomHelpAction(new HelpAction());
+            aaa.Invoke(_rootCommand.Parse("--csv is required. Exiting"));
+          
             Console.WriteLine();
             return;
         }
@@ -538,6 +545,23 @@ internal class Program
         }
     }
 
+    private class CustomHelpAction : SynchronousCommandLineAction
+    {
+        private readonly HelpAction _defaultHelp;
 
+        public CustomHelpAction(HelpAction action)
+        {
+            _defaultHelp = action;
+        }
+
+        public override int Invoke(ParseResult parseResult)
+        {
+            var result = _defaultHelp.Invoke(parseResult);
+
+            Log.Warning("{Msg}", string.Join(" ",parseResult.Tokens));
+
+            return result;
+        }
+    }
   
 }
