@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Help;
 using System.CommandLine.Invocation;
@@ -13,7 +14,6 @@ using System.Text;
 using System.Threading.Tasks;
 using CsvHelper;
 using Exceptionless;
-using Exceptionless.Logging;
 using Serilog;
 using Serilog.Core;
 using Serilog.Events;
@@ -22,28 +22,12 @@ using SumData;
 
 namespace SumECmd;
 
-public class ApplicationArguments
-{
-    public string Directory { get; set; }
-    public string CsvDirectory { get; set; }
-
-    public string DateTimeFormat { get; set; }
-
-    public bool WithDetail { get; set; }
-    public bool Debug { get; set; }
-    public bool Trace { get; set; }
-}
-
-
-
 internal class Program
 {
-    
-    private static readonly string BaseDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
     private static DateTimeOffset _timestamp;
 
     private static readonly string Header =
-        $"SumECmd version {Assembly.GetExecutingAssembly().GetName().Version}" +
+        $"SumECmd version {Assembly.GetExecutingAssembly().GetName().Version.ToString(3)}" +
         "\r\n\r\nAuthor: Eric Zimmerman (saericzimmerman@gmail.com)" +
         "\r\nhttps://github.com/EricZimmerman/Sum";
 
@@ -62,15 +46,15 @@ internal class Program
         {
             return true;
         }
-            
+
         var identity = WindowsIdentity.GetCurrent();
         var principal = new WindowsPrincipal(identity);
         return principal.IsInRole(WindowsBuiltInRole.Administrator);
     }
-    
-   
 
-    private static async Task Main(string[] args)
+
+
+    private static async Task<int> Main(string[] args)
     {
         ExceptionlessClient.Default.Startup("3DWn5we5zp92pJRvMetSThai8YZCuJQf7Lx3ssLl");
 
@@ -80,24 +64,24 @@ internal class Program
         {
             Description = "Directory to process, looking for SystemIdentity.mdb, Current.mdb, etc. Required.\r\n"
         };
-        
+
         var csvOpt = new Option<string>("--csv")
         {
             Description = "Directory to save CSV formatted results to. Be sure to include the full path in double quotes\r\n"
         };
-        
+
         var wdOpt = new Option<bool>("--wd")
         {
             Description = "Generate CSV with day level details. Default is TRUE",
             DefaultValueFactory = _ => true
         };
-        
+
         var dtOpt = new Option<string>("--dt")
         {
             Description = "The custom date/time format to use when displaying time stamps. See https://goo.gl/CNVq0k for options",
             DefaultValueFactory = _ => "yyyy-MM-dd HH:mm:ss"
         };
-        
+
         var debugOpt = new Option<bool>("--debug")
         {
             Description = "Show debug information during processing",
@@ -117,20 +101,23 @@ internal class Program
            dtOpt,
            debugOpt,
            traceOpt
-           
+
         };
-            
+
         _rootCommand.Description = Header + "\r\n\r\n" + Footer;
 
         _rootCommand.SetAction(result => DoWork(result.GetValue(dOpt), result.GetValue(csvOpt), result.GetValue(wdOpt),
             result.GetValue(dtOpt), result.GetValue(debugOpt), result.GetValue(traceOpt)));
-        
-        var foo = _rootCommand.Parse(args).InvokeAsync();
-        
+
+        var exitCode = await _rootCommand.Parse(args).InvokeAsync();
+
         Log.CloseAndFlush();
+
+        return exitCode;
     }
 
-    private static void DoWork(string d, string csv,bool wd, string dt, bool debug, bool trace)
+    /// <returns>0 on success; 1 for invalid arguments, a database that is missing or could not be read, or an export that failed</returns>
+    private static int DoWork(string d, string csv,bool wd, string dt, bool debug, bool trace)
     {
         var levelSwitch = new LoggingLevelSwitch();
 
@@ -147,46 +134,44 @@ internal class Program
             levelSwitch.MinimumLevel = LogEventLevel.Verbose;
             template = "[{Timestamp:HH:mm:ss.fff} {Level:u3}] {Message:lj}{NewLine}{Exception}";
         }
-        
+
         var conf = new LoggerConfiguration()
             .WriteTo.Console(outputTemplate: template)
             .MinimumLevel.ControlledBy(levelSwitch);
-      
+
         Log.Logger = conf.CreateLogger();
-        
+
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
             Console.WriteLine();
-            Log.Fatal("Non-Windows platforms not supported due to the need to load ESI specific Windows libraries! Exiting...");
+            Log.Fatal("Non-Windows platforms not supported due to the need to load ESE specific Windows libraries! Exiting...");
             Console.WriteLine();
-            Environment.Exit(0);
-            return;
+            return 1;
         }
 
         if (d.IsNullOrEmpty())
         {
             var aaa = new CustomHelpAction(new HelpAction());
             aaa.Invoke(_rootCommand.Parse("-d is required. Exiting"));
-            
+
             Console.WriteLine();
-            return;
+            return 1;
         }
 
-        if (d.IsNullOrEmpty() == false &&
-            !Directory.Exists(d))
+        if (!Directory.Exists(d))
         {
             Log.Warning("Directory '{D}' not found. Exiting",d);
             Console.WriteLine();
-            return;
+            return 1;
         }
 
         if (csv.IsNullOrEmpty())
         {
             var aaa = new CustomHelpAction(new HelpAction());
             aaa.Invoke(_rootCommand.Parse("--csv is required. Exiting"));
-          
+
             Console.WriteLine();
-            return;
+            return 1;
         }
 
         Log.Information("{Header}",Header);
@@ -204,13 +189,14 @@ internal class Program
         sw.Start();
 
         _timestamp = DateTimeOffset.UtcNow;
-            
-        Sum sd = null;
+
+        Sum sd;
 
         try
         {
             Log.Information("Processing '{D}'...",d);
             Console.WriteLine();
+            //the databases are read from copies in a temporary folder: nothing in -d is changed
             sd = new Sum(d);
             Console.WriteLine();
             Log.Information("Processing complete!");
@@ -226,53 +212,86 @@ internal class Program
         }
         catch (FileNotFoundException fe)
         {
-            Log.Error(fe,"File not found: {Message}",fe.Message);
+            Log.Error("{Message}",fe.Message);
             Console.WriteLine();
-            Environment.Exit(0);
+            return 1;
         }
         catch (Exception e)
         {
-            Log.Error(e,"Error processing file! Message: {Message}.\r\n\r\nThis almost always means the database is dirty and must be repaired. This can be verified by running 'esentutl.exe /mh <dbname>.mdb' and examining the 'State' property",e.Message);
+            Log.Error(e,"Error processing '{D}'! Message: {Message}",d,e.Message);
             Console.WriteLine();
-            Log.Information("If the database is dirty, **make a copy of your files**, ensure all files in the directory are not Read-only, open a PowerShell session as an admin, and repair by using the following commands (change directories to the location of <dbname>.mdb first):\r\n\r\n'esentutl.exe /r svc /i'\r\n'esentutl.exe /p <dbname>.mdb'\r\n\r\n");
-
-            Console.WriteLine();
-
-            Environment.Exit(0);
+            return 1;
         }
 
-        Log.Information("The following databases were processed:");
-        foreach (var sdProcessedDatabase in sd.ProcessedDatabases)
+        if (sd.FailedDatabases.Count > 0 && sd.ParseErrors.Any(t => t.Contains("could not be opened")))
         {
-            Log.Information("\t{FileName}",sdProcessedDatabase.FileName);
+            Log.Information("A database that still can't be opened may be damaged beyond what 'esentutl.exe /p' (run on a copy) can repair. 'esentutl.exe /mh <dbname>.mdb' shows its state");
+            Console.WriteLine();
         }
 
-        Console.WriteLine();
+        if (sd.ProcessedDatabases.Count > 0)
+        {
+            Log.Information("The following databases were processed:");
+            foreach (var sdProcessedDatabase in sd.ProcessedDatabases)
+            {
+                Log.Information("\t{FileName} (year {Year}, from {YearSource})",sdProcessedDatabase.FileName,sdProcessedDatabase.Year,sdProcessedDatabase.YearSource);
+            }
+
+            Console.WriteLine();
+        }
 
         Log.Information("Exporting data...");
 
-        if (Directory.Exists(csv) == false)
+        var exportFailed = false;
+
+        try
         {
-            Directory.CreateDirectory(csv);
+            if (Directory.Exists(csv) == false)
+            {
+                Directory.CreateDirectory(csv);
+            }
+
+            exportFailed |= !ExportSystemIdentity(sd,csv,dt);
+            exportFailed |= !ExportSystemRole(sd,csv);
+            exportFailed |= !ExportChainedDb(sd,csv);
+
+            ExportProcessedDetails(sd,csv,dt,wd);
         }
-        ExportSystemIdentity(sd,csv,dt);
-        ExportSystemRole(sd,csv);
-        ExportChainedDb(sd,csv);
-            
-        ExportProcessedDetails(sd,csv,dt,wd);
+        catch (Exception e)
+        {
+            Log.Error(e,"Error exporting data to '{Csv}': {Message}",csv,e.Message);
+            exportFailed = true;
+        }
 
         sw.Stop();
+
+        if (sd.ParseErrors.Count > 0)
+        {
+            Console.WriteLine();
+            Log.Warning("{Count:N0} problem(s) found while reading the databases (everything else was exported):",sd.ParseErrors.Count);
+            foreach (var parseError in sd.ParseErrors.Take(50))
+            {
+                Log.Warning("\t{ParseError}",parseError);
+            }
+
+            if (sd.ParseErrors.Count > 50)
+            {
+                Log.Warning("\t... and {Count:N0} more (use --debug to see them all as they happen)",sd.ParseErrors.Count - 50);
+            }
+        }
 
         Console.WriteLine();
 
         Log.Information("Processing completed in {TotalSeconds:N4} seconds",sw.Elapsed.TotalSeconds);
         Console.WriteLine();
+
+        return sd.FailedDatabases.Count > 0 || exportFailed ? 1 : 0;
     }
 
     private static CsvWriter GetCsvWriter(string tableName, string csv)
     {
         var outName = $"{_timestamp:yyyyMMddHHmmss}_SumECmd_DETAIL_{tableName}_Output.csv";
-            
+
         var outFile = Path.Combine(csv, outName);
 
         Log.Debug("Setting up {TableName} output file: '{OutFile}'",tableName,outFile);
@@ -288,261 +307,235 @@ internal class Program
     {
         CsvWriter csvWriterClients = null;
         CsvWriter csvWriterClientsDetail = null;
-        CsvWriter csvWriterDns = null; 
-        CsvWriter csvWriterRoles = null; 
+        CsvWriter csvWriterDns = null;
+        CsvWriter csvWriterRoles = null;
         CsvWriter csvWriterVm = null;
 
-        foreach (var sdProcessedDatabase in sd.ProcessedDatabases)
+        //(none of them was ever closed)
+        try
         {
-            Log.Information("Exporting Client info from '{FileName}'...",Path.GetFileName(sdProcessedDatabase.FileName));
-            foreach (var client in sdProcessedDatabase.Clients)
+            foreach (var sdProcessedDatabase in sd.ProcessedDatabases)
             {
-                foreach (var clientEntry in client.Value)
+                Log.Information("Exporting Client info from '{FileName}'...",Path.GetFileName(sdProcessedDatabase.FileName));
+                foreach (var client in sdProcessedDatabase.Clients)
                 {
-                    if (csvWriterClients == null)
+                    foreach (var clientEntry in client.Value)
                     {
-                        csvWriterClients = GetCsvWriter("Clients",csv);
-
-                        var mapClient = csvWriterClients.Context.AutoMap<ClientEntry>();
-                        mapClient.Map(t => t.InsertDate).Convert(t => $"{t.Value.InsertDate.ToString(dt)}");
-                        mapClient.Map(t => t.LastAccess).Convert(t => $"{t.Value.LastAccess.ToString(dt)}");
-                        csvWriterClients.Context.RegisterClassMap(mapClient);
-                        csvWriterClients.WriteHeader<ClientEntry>();
-                        csvWriterClients.NextRecord();
-                    }
-
-                    if (wd && csvWriterClientsDetail == null)
-                    {
-                        csvWriterClientsDetail = GetCsvWriter("ClientsDetailed",csv);
-
-                        var mapClient = csvWriterClients.Context.AutoMap<ClientEntryDayDetail>();
-                        mapClient.Map(t => t.InsertDate).Convert(t => $"{t.Value.InsertDate.ToString(dt)}");
-                        mapClient.Map(t => t.LastAccess).Convert(t => $"{t.Value.LastAccess.ToString(dt)}");
-                        mapClient.Map(t => t.Date).Convert(t => $"{t.Value.Date:yyyy-MM-dd}");
-                        csvWriterClientsDetail.Context.RegisterClassMap(mapClient);
-                        csvWriterClientsDetail.WriteHeader<ClientEntryDayDetail>();
-                        csvWriterClientsDetail.NextRecord();
-                    }
-
-                    var roleDesc = sd.RoleInfos.SingleOrDefault(t => t.RoleGuid == client.Key);
-
-                    clientEntry.RoleGuid = client.Key.ToString();
-                    clientEntry.SourceFile = Path.GetFileName(sdProcessedDatabase.FileName);
-                        
-                    clientEntry.RoleDescription = roleDesc != null ? roleDesc.RoleName : "(Unknown Role Guid)";
-
-                    if (wd)
-                    {
-                        foreach (var dayEntry in clientEntry.DayInfo)
+                        if (csvWriterClients == null)
                         {
-                            var clientEntryDayDetail = new ClientEntryDayDetail(clientEntry, dayEntry);
-                            csvWriterClientsDetail.WriteRecord(clientEntryDayDetail);
+                            csvWriterClients = GetCsvWriter("Clients",csv);
+
+                            var mapClient = csvWriterClients.Context.AutoMap<ClientEntry>();
+                            mapClient.Map(t => t.InsertDate).Convert(t => $"{t.Value.InsertDate.ToString(dt)}");
+                            mapClient.Map(t => t.LastAccess).Convert(t => $"{t.Value.LastAccess.ToString(dt)}");
+                            csvWriterClients.Context.RegisterClassMap(mapClient);
+                            csvWriterClients.WriteHeader<ClientEntry>();
+                            csvWriterClients.NextRecord();
+                        }
+
+                        if (wd && csvWriterClientsDetail == null)
+                        {
+                            csvWriterClientsDetail = GetCsvWriter("ClientsDetailed",csv);
+
+                            var mapClient = csvWriterClientsDetail.Context.AutoMap<ClientEntryDayDetail>();
+                            mapClient.Map(t => t.InsertDate).Convert(t => $"{t.Value.InsertDate.ToString(dt)}");
+                            mapClient.Map(t => t.LastAccess).Convert(t => $"{t.Value.LastAccess.ToString(dt)}");
+                            mapClient.Map(t => t.Date).Convert(t => $"{t.Value.Date:yyyy-MM-dd}");
+                            csvWriterClientsDetail.Context.RegisterClassMap(mapClient);
+                            csvWriterClientsDetail.WriteHeader<ClientEntryDayDetail>();
                             csvWriterClientsDetail.NextRecord();
                         }
+
+                        //(SingleOrDefault threw for a role listed twice)
+                        var roleDesc = sd.RoleInfos.FirstOrDefault(t => t.RoleGuid == client.Key);
+
+                        clientEntry.RoleGuid = client.Key.ToString();
+                        clientEntry.SourceFile = Path.GetFileName(sdProcessedDatabase.FileName);
+
+                        clientEntry.RoleDescription = roleDesc != null ? roleDesc.RoleName : "(Unknown Role Guid)";
+
+                        if (wd)
+                        {
+                            foreach (var dayEntry in clientEntry.DayInfo)
+                            {
+                                var clientEntryDayDetail = new ClientEntryDayDetail(clientEntry, dayEntry);
+                                csvWriterClientsDetail.WriteRecord(clientEntryDayDetail);
+                                csvWriterClientsDetail.NextRecord();
+                            }
+                        }
+
+                        csvWriterClients.WriteRecord(clientEntry);
+                        csvWriterClients.NextRecord();
+                    }
+                }
+
+                if (sdProcessedDatabase.DnsInfo.Any())
+                {
+                    Log.Information("Exporting DNS info from '{FileName}'...",Path.GetFileName(sdProcessedDatabase.FileName));
+                }
+                foreach (var dnsEntry in sdProcessedDatabase.DnsInfo)
+                {
+                    if (csvWriterDns == null)
+                    {
+                        csvWriterDns = GetCsvWriter("DnsInfo",csv);
+
+                        var mapDns = csvWriterDns.Context.AutoMap<DnsEntry>();
+                        mapDns.Map(t => t.LastSeen).Convert(t => $"{t.Value.LastSeen.ToString(dt)}");
+                        csvWriterDns.Context.RegisterClassMap(mapDns);
+                        csvWriterDns.WriteHeader<DnsEntry>();
+                        csvWriterDns.NextRecord();
                     }
 
-                    csvWriterClients.WriteRecord(clientEntry);
-                    csvWriterClients.NextRecord();
-                }
-            }
-
-            if (sdProcessedDatabase.DnsInfo.Any())
-            {
-                Log.Information("Exporting DNS info from '{FileName}'...",Path.GetFileName(sdProcessedDatabase.FileName));
-            }
-            foreach (var dnsEntry in sdProcessedDatabase.DnsInfo)
-            {
-                if (csvWriterDns == null)
-                {
-                    csvWriterDns = GetCsvWriter("DnsInfo",csv);
-
-                    var mapDns = csvWriterDns.Context.AutoMap<DnsEntry>();
-                    mapDns.Map(t => t.LastSeen).Convert(t => $"{t.Value.LastSeen.ToString(dt)}");
-                    csvWriterDns.Context.RegisterClassMap(mapDns);
-                    csvWriterDns.WriteHeader<DnsEntry>();
+                    dnsEntry.SourceFile = Path.GetFileName(sdProcessedDatabase.FileName);
+                    csvWriterDns.WriteRecord(dnsEntry);
                     csvWriterDns.NextRecord();
                 }
 
-                dnsEntry.SourceFile = Path.GetFileName(sdProcessedDatabase.FileName);
-                csvWriterDns.WriteRecord(dnsEntry);
-                csvWriterDns.NextRecord();
-            }
-
-            if (sdProcessedDatabase.RoleAccesses.Any())
-            {
-                Log.Information("Exporting Role access info from '{FileName}'...",Path.GetFileName(sdProcessedDatabase.FileName));
-            }
-            foreach (var roleAccess in sdProcessedDatabase.RoleAccesses)
-            {
-                if (csvWriterRoles == null)
+                if (sdProcessedDatabase.RoleAccesses.Any())
                 {
-                    csvWriterRoles = GetCsvWriter("RoleAccesses",csv);
+                    Log.Information("Exporting Role access info from '{FileName}'...",Path.GetFileName(sdProcessedDatabase.FileName));
+                }
+                foreach (var roleAccess in sdProcessedDatabase.RoleAccesses)
+                {
+                    if (csvWriterRoles == null)
+                    {
+                        csvWriterRoles = GetCsvWriter("RoleAccesses",csv);
 
-                    var mapRole = csvWriterRoles.Context.AutoMap<RoleAccessEntry>();
-                    mapRole.Map(t => t.FirstSeen).Convert(t => $"{t.Value.FirstSeen.ToString(dt)}");
-                    mapRole.Map(t => t.LastSeen).Convert(t => $"{t.Value.LastSeen.ToString(dt)}");
-                    csvWriterRoles.Context.RegisterClassMap(mapRole);
-                    csvWriterRoles.WriteHeader<RoleAccessEntry>();
+                        var mapRole = csvWriterRoles.Context.AutoMap<RoleAccessEntry>();
+                        mapRole.Map(t => t.FirstSeen).Convert(t => $"{t.Value.FirstSeen.ToString(dt)}");
+                        mapRole.Map(t => t.LastSeen).Convert(t => $"{t.Value.LastSeen.ToString(dt)}");
+                        csvWriterRoles.Context.RegisterClassMap(mapRole);
+                        csvWriterRoles.WriteHeader<RoleAccessEntry>();
+                        csvWriterRoles.NextRecord();
+                    }
+                    roleAccess.SourceFile = Path.GetFileName(sdProcessedDatabase.FileName);
+
+                    var roleDesc = sd.RoleInfos.FirstOrDefault(t => t.RoleGuid == roleAccess.RoleGuid);
+
+                    roleAccess.RoleDescription = roleDesc != null ? roleDesc.RoleName : "(Unknown Role Guid)";
+
+                    csvWriterRoles.WriteRecord(roleAccess);
                     csvWriterRoles.NextRecord();
                 }
-                roleAccess.SourceFile = Path.GetFileName(sdProcessedDatabase.FileName);
 
-                var roleDesc = sd.RoleInfos.FirstOrDefault(t => t.RoleGuid == roleAccess.RoleGuid);
-
-                roleAccess.RoleDescription = roleDesc != null ? roleDesc.RoleName : "(Unknown Role Guid)";
-
-                csvWriterRoles.WriteRecord(roleAccess);
-                csvWriterRoles.NextRecord();
-            }
-
-            if (sdProcessedDatabase.VmInfo.Any())
-            {
-                Log.Information("Exporting Vm info from '{FileName}'...",Path.GetFileName(sdProcessedDatabase.FileName));
-            }
-            foreach (var vm in sdProcessedDatabase.VmInfo)
-            {
-                if (csvWriterVm == null)
+                if (sdProcessedDatabase.VmInfo.Any())
                 {
-                    csvWriterVm = GetCsvWriter("VmInfo",csv);
-                    var mapVm = csvWriterVm.Context.AutoMap<VmEntry>();
-                    mapVm.Map(t => t.CreationTime).Convert(t => $"{t.Value.CreationTime.ToString(dt)}");
-                    mapVm.Map(t => t.LastSeenActive).Convert(t => $"{t.Value.LastSeenActive.ToString(dt)}");
-                    csvWriterVm.Context.RegisterClassMap(mapVm);
-                    csvWriterVm.WriteHeader<VmEntry>();
+                    Log.Information("Exporting Vm info from '{FileName}'...",Path.GetFileName(sdProcessedDatabase.FileName));
+                }
+                foreach (var vm in sdProcessedDatabase.VmInfo)
+                {
+                    if (csvWriterVm == null)
+                    {
+                        csvWriterVm = GetCsvWriter("VmInfo",csv);
+                        var mapVm = csvWriterVm.Context.AutoMap<VmEntry>();
+                        mapVm.Map(t => t.CreationTime).Convert(t => $"{t.Value.CreationTime.ToString(dt)}");
+                        mapVm.Map(t => t.LastSeenActive).Convert(t => $"{t.Value.LastSeenActive.ToString(dt)}");
+                        csvWriterVm.Context.RegisterClassMap(mapVm);
+                        csvWriterVm.WriteHeader<VmEntry>();
+                        csvWriterVm.NextRecord();
+                    }
+                    vm.SourceFile = Path.GetFileName(sdProcessedDatabase.FileName);
+                    csvWriterVm.WriteRecord(vm);
                     csvWriterVm.NextRecord();
                 }
-                vm.SourceFile = Path.GetFileName(sdProcessedDatabase.FileName);
-                csvWriterVm.WriteRecord(vm);
-                csvWriterVm.NextRecord();
+
+                Log.Information("-----------------------------------------------------------------------------------------------------");
             }
 
-            Log.Information("-----------------------------------------------------------------------------------------------------");
+            csvWriterClients?.Flush();
+            csvWriterDns?.Flush();
+            csvWriterVm?.Flush();
+            csvWriterRoles?.Flush();
+            csvWriterClientsDetail?.Flush();
+
+            Console.WriteLine();
+            Log.Information("Export totals");
+
+            if (csvWriterClients != null)
+            {
+                Log.Information("Found {Rows:N0} Client entries",csvWriterClients.Row - 2);
+            }
+
+            if (csvWriterClientsDetail != null)
+            {
+                Log.Information("Found {Rows:N0} Client detail entries",csvWriterClientsDetail.Row - 2);
+            }
+
+            if (csvWriterDns != null)
+            {
+                Log.Information("Found {Rows:N0} DNS entries",csvWriterDns.Row - 2);
+            }
+
+
+            if (csvWriterRoles != null)
+            {
+                Log.Information("Found {Rows:N0} Role entries",csvWriterRoles.Row - 2);
+            }
+
+
+            if (csvWriterVm != null)
+            {
+                Log.Information("Found {Rows:N0} VM entries",csvWriterVm.Row - 2);
+            }
         }
-
-        csvWriterClients?.Flush();
-        csvWriterDns?.Flush();
-        csvWriterVm?.Flush();
-        csvWriterRoles?.Flush();
-        csvWriterClientsDetail?.Flush();
-
-        Console.WriteLine();
-        Log.Information("Export totals");
-
-        if (csvWriterClients != null)
+        finally
         {
-            Log.Information("Found {Rows:N0} Client entries",csvWriterClients.Row - 2);
-        }
-
-        if (csvWriterClientsDetail != null)
-        {
-            Log.Information("Found {Rows:N0} Client detail entries",csvWriterClientsDetail.Row - 2);
-        }
-
-        if (csvWriterDns != null)
-        {
-            Log.Information("Found {Rows:N0} DNS entries",csvWriterDns.Row - 2);
-        }
-
-
-        if (csvWriterRoles != null)
-        {
-            Log.Information("Found {Rows:N0} Role entries",csvWriterRoles.Row - 2);
-        }
-         
-
-        if (csvWriterVm != null)
-        {
-            Log.Information("Found {Rows:N0} VM entries",csvWriterVm.Row - 2);
+            csvWriterClients?.Dispose();
+            csvWriterClientsDetail?.Dispose();
+            csvWriterDns?.Dispose();
+            csvWriterRoles?.Dispose();
+            csvWriterVm?.Dispose();
         }
     }
 
-    private static void ExportChainedDb(Sum sd, string csv)
+    /// <summary>
+    ///     One summary CSV (written even when it has no rows, as before)
+    /// </summary>
+    private static bool ExportSummary<T>(IEnumerable<T> records, string csv, string name, Action<CsvHelper.Configuration.ClassMap<T>> configure = null)
     {
         try
         {
-            var outName = $"{_timestamp:yyyyMMddHHmmss}_SumECmd_SUMMARY_ChainedDbInfo_Output.csv";
+            var outName = $"{_timestamp:yyyyMMddHHmmss}_SumECmd_SUMMARY_{name}_Output.csv";
 
             var outFile = Path.Combine(csv, outName);
 
-            var swCsv = new StreamWriter(outFile, false, Encoding.UTF8);
+            using var swCsv = new StreamWriter(outFile, false, Encoding.UTF8);
 
-            var csvWriter = new CsvWriter(swCsv, CultureInfo.InvariantCulture);
+            using var csvWriter = new CsvWriter(swCsv, CultureInfo.InvariantCulture);
 
-            var foo = csvWriter.Context.AutoMap<ChainedDbInfo>();
+            var map = csvWriter.Context.AutoMap<T>();
+            configure?.Invoke(map);
 
-            csvWriter.Context.RegisterClassMap(foo);
-            csvWriter.WriteHeader<ChainedDbInfo>();
+            csvWriter.Context.RegisterClassMap(map);
+            csvWriter.WriteHeader<T>();
             csvWriter.NextRecord();
 
-            csvWriter.WriteRecords(sd.ChainedDbs);
+            csvWriter.WriteRecords(records);
 
-            csvWriter.Flush();
-            swCsv.Flush();
+            return true;
         }
         catch (Exception e)
         {
-            Log.Error(e,"Error exporting 'SystemIdentInfo' data! Error: {Message}",e.Message);
+            //(the messages for the chained database and role CSVs said SystemIdentInfo)
+            Log.Error(e,"Error exporting '{Name}' data! Error: {Message}",name,e.Message);
+            return false;
         }
     }
 
-    private static void ExportSystemRole(Sum sd, string csv)
+    private static bool ExportChainedDb(Sum sd, string csv)
     {
-        try
-        {
-            var outName = $"{_timestamp:yyyyMMddHHmmss}_SumECmd_SUMMARY_RoleInfos_Output.csv";
-
-            var outFile = Path.Combine(csv, outName);
-
-            var swCsv = new StreamWriter(outFile, false, Encoding.UTF8);
-
-            var csvWriter = new CsvWriter(swCsv, CultureInfo.InvariantCulture);
-
-            var foo = csvWriter.Context.AutoMap<RoleInfo>();
-
-            csvWriter.Context.RegisterClassMap(foo);
-            csvWriter.WriteHeader<RoleInfo>();
-            csvWriter.NextRecord();
-
-            csvWriter.WriteRecords(sd.RoleInfos);
-
-            csvWriter.Flush();
-            swCsv.Flush();
-        }
-        catch (Exception e)
-        {
-            Log.Error(e,"Error exporting 'SystemIdentInfo' data! Error: {Message}",e.Message);
-        }
+        return ExportSummary(sd.ChainedDbs, csv, "ChainedDbInfo");
     }
 
-    private static void ExportSystemIdentity(Sum sd, string csv, string dt)
+    private static bool ExportSystemRole(Sum sd, string csv)
     {
-        try
-        {
-            var outName = $"{_timestamp:yyyyMMddHHmmss}_SumECmd_SUMMARY_SystemIdentInfo_Output.csv";
+        return ExportSummary(sd.RoleInfos, csv, "RoleInfos");
+    }
 
-            var outFile = Path.Combine(csv, outName);
-
-            var swCsv = new StreamWriter(outFile, false, Encoding.UTF8);
-
-            var csvWriter = new CsvWriter(swCsv, CultureInfo.InvariantCulture);
-
-            var foo = csvWriter.Context.AutoMap<SystemIdentInfo>();
-
-            foo.Map(t => t.CreationTime).Convert(t => $"{t.Value.CreationTime.ToString(dt)}");
-
-            csvWriter.Context.RegisterClassMap(foo);
-            csvWriter.WriteHeader<SystemIdentInfo>();
-            csvWriter.NextRecord();
-
-            csvWriter.WriteRecords(sd.SystemIdentityInfos);
-
-            csvWriter.Flush();
-            swCsv.Flush();
-        }
-        catch (Exception e)
-        {
-            Log.Error(e,"Error exporting 'SystemIdentInfo' data! Error: {Message}",e.Message);
-        }
+    private static bool ExportSystemIdentity(Sum sd, string csv, string dt)
+    {
+        return ExportSummary(sd.SystemIdentityInfos, csv, "SystemIdentInfo",
+            map => map.Map(t => t.CreationTime).Convert(t => $"{t.Value.CreationTime.ToString(dt)}"));
     }
 
     private class CustomHelpAction : SynchronousCommandLineAction
@@ -563,5 +556,5 @@ internal class Program
             return result;
         }
     }
-  
+
 }

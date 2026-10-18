@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="SumData/SumData.csproj" />
+  <Project Path="SumECmd/SumECmd.csproj" />
+  <Project Path="SumTest/SumTest.csproj" />
+</Solution>
