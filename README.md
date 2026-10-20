@@ -15,6 +15,7 @@ Process Microsoft User Access Logs (UAL, the `SUM` folder on Windows Server)! Th
         --wd            Generate CSV with day level details. Default is TRUE
 
         --dt            The custom date/time format to use when displaying time stamps. Default is: yyyy-MM-dd HH:mm:ss
+        --temp          Folder for the temporary copies of the UAL databases and their transaction logs, which are opened instead of the evidence and deleted when done. Default: a Temp folder next to SumECmd. A folder that isn't there is created, and removed again when done. If that folder can't be written to, SumECmd stops: give a writable folder with --temp
 
         --debug         Show debug information during processing
         --trace         Show trace information during processing
@@ -38,7 +39,7 @@ Windows only (the databases are read with Windows' ESE engine, `esent.dll`).
 
 ## Dirty databases
 
-The databases are never opened where they are: SumECmd copies them, with their transaction logs (`Svc*.log`, `Svc.chk`, `*.jrs`), to a temporary folder, and works on the copies. Nothing in the `-d` folder changes, so it can be read-only.
+The databases are never opened where they are: SumECmd copies them, with their transaction logs (`Svc*.log`, `Svc.chk`, `*.jrs`), to a temporary folder, and works on the copies. Nothing in the `-d` folder changes, so it can be read-only. The temporary folder is `--temp`, or by default a `Temp` folder next to SumECmd (never the user's `%TEMP%`); the copies are deleted when done. If that folder can't be written to, SumECmd stops and asks for `--temp`.
 
 UAL databases collected from a running server are usually in a dirty state. SumECmd handles this by itself, on the copies:
 

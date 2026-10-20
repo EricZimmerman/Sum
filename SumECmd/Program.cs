@@ -82,6 +82,11 @@ internal class Program
             DefaultValueFactory = _ => "yyyy-MM-dd HH:mm:ss"
         };
 
+        var tempOpt = new Option<string>("--temp")
+        {
+            Description = TempFolder.Help
+        };
+
         var debugOpt = new Option<bool>("--debug")
         {
             Description = "Show debug information during processing",
@@ -99,6 +104,7 @@ internal class Program
            csvOpt,
            wdOpt,
            dtOpt,
+           tempOpt,
            debugOpt,
            traceOpt
 
@@ -107,7 +113,7 @@ internal class Program
         _rootCommand.Description = Header + "\r\n\r\n" + Footer;
 
         _rootCommand.SetAction(result => DoWork(result.GetValue(dOpt), result.GetValue(csvOpt), result.GetValue(wdOpt),
-            result.GetValue(dtOpt), result.GetValue(debugOpt), result.GetValue(traceOpt)));
+            result.GetValue(dtOpt), result.GetValue(tempOpt), result.GetValue(debugOpt), result.GetValue(traceOpt)));
 
         var exitCode = await _rootCommand.Parse(args).InvokeAsync();
 
@@ -117,7 +123,7 @@ internal class Program
     }
 
     /// <returns>0 on success; 1 for invalid arguments, a database that is missing or could not be read, or an export that failed</returns>
-    private static int DoWork(string d, string csv,bool wd, string dt, bool debug, bool trace)
+    private static int DoWork(string d, string csv,bool wd, string dt, string temp, bool debug, bool trace)
     {
         var levelSwitch = new LoggingLevelSwitch();
 
@@ -192,12 +198,28 @@ internal class Program
 
         Sum sd;
 
+        //the databases are read from copies, made in --temp or Temp next to SumECmd (never the user's %TEMP%)
+        var tempFolder = TempFolder.Prepare(temp, out var tempCreated, out var tempError);
+        if (tempFolder == null)
+        {
+            Log.Error("The folder for the temporary copies of the databases can't be written to ({Error}). Give one with --temp. Exiting", tempError);
+            Console.WriteLine();
+            return 1;
+        }
+
         try
         {
             Log.Information("Processing '{D}'...",d);
             Console.WriteLine();
-            //the databases are read from copies in a temporary folder: nothing in -d is changed
-            sd = new Sum(d);
+            //the databases are read from copies in the temporary folder: nothing in -d is changed
+            try
+            {
+                sd = new Sum(d, tempFolder);
+            }
+            finally
+            {
+                TempFolder.RemoveIfEmpty(tempFolder, tempCreated);
+            }
             Console.WriteLine();
             Log.Information("Processing complete!");
             Console.WriteLine();

@@ -38,7 +38,12 @@ public class CliTests
         }
     }
 
-    private static (int ExitCode, string Output) Run(params string[] args)
+    //the user's temp folder: an empty one, which must stay empty (the copies go to --temp or Temp next to the program)
+    private string SystemTemp => Path.Combine(_dir, "systemp");
+
+    private static string TempNextToProgram => Path.Combine(TestContext.CurrentContext.TestDirectory, "Temp");
+
+    private (int ExitCode, string Output) Run(params string[] args)
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -46,6 +51,12 @@ public class CliTests
             RedirectStandardError = true,
             UseShellExecute = false
         };
+        Directory.CreateDirectory(SystemTemp);
+        foreach (var name in new[] { "TEMP", "TMP", "TMPDIR" })
+        {
+            start.Environment[name] = SystemTemp;
+        }
+
         start.ArgumentList.Add(Path.Combine(TestContext.CurrentContext.TestDirectory, "SumECmd.dll"));
         foreach (var a in args)
         {
@@ -56,6 +67,12 @@ public class CliTests
         var err = p.StandardError.ReadToEndAsync();
         var output = p.StandardOutput.ReadToEnd();
         p.WaitForExit(120_000).Should().BeTrue();
+        Directory.GetFileSystemEntries(SystemTemp).Should().BeEmpty("nothing goes to the user's temp folder");
+        if (Directory.Exists(TempNextToProgram))
+        {
+            Directory.GetDirectories(TempNextToProgram, "SumData-*").Should().BeEmpty("the copies are deleted");
+        }
+
         return (p.ExitCode, output + err.Result);
     }
 
@@ -114,5 +131,53 @@ public class CliTests
         code.Should().Be(1, "Current.mdb can't be opened");
         output.Should().Contain("Current.mdb");
         Directory.GetFiles(Path.Combine(_dir, "out"), "*SystemIdentInfo*").Should().ContainSingle("what could be read is exported");
+    }
+    [Test]
+    public void CopiesGoToTempNextToTheProgram()
+    {
+        Databases();
+        var existed = Directory.Exists(TempNextToProgram);
+
+        var (code, output) = Run("-d", Path.Combine(_dir, "sum"), "--csv", Path.Combine(_dir, "out"));
+
+        code.Should().Be(0, output);
+        //the copies' folder is deleted, and Temp too when this run made it and it is empty
+        if (Directory.Exists(TempNextToProgram))
+        {
+            existed.Should().BeTrue("Temp is removed when the run created it and it is empty");
+        }
+    }
+
+    [Test]
+    public void CopiesGoToTheTempGiven()
+    {
+        Databases();
+        var temp = Directory.CreateDirectory(Path.Combine(_dir, "my temp")).FullName;
+
+        var (code, output) = Run("-d", Path.Combine(_dir, "sum"), "--csv", Path.Combine(_dir, "out"), "--temp", temp);
+
+        code.Should().Be(0, output);
+        Directory.Exists(temp).Should().BeTrue("a folder that was there is kept");
+        Directory.GetFileSystemEntries(temp).Should().BeEmpty("the copies are deleted when done");
+
+        //one that wasn't there is created, and removed again
+        var newTemp = Path.Combine(_dir, "new temp");
+        Run("-d", Path.Combine(_dir, "sum"), "--csv", Path.Combine(_dir, "out2"), "--temp", newTemp).ExitCode.Should().Be(0);
+        Directory.Exists(newTemp).Should().BeFalse();
+    }
+
+    [Test]
+    public void TempThatCantBeWrittenStops()
+    {
+        Databases();
+        //a folder under a file can't be created
+        var file = Path.Combine(_dir, "a file");
+        File.WriteAllText(file, "x");
+
+        var (code, output) = Run("-d", Path.Combine(_dir, "sum"), "--csv", Path.Combine(_dir, "out"), "--temp", Path.Combine(file, "temp"));
+
+        code.Should().Be(1, output);
+        output.Should().Contain("Give one with --temp");
+        Directory.Exists(Path.Combine(_dir, "out")).Should().BeFalse("nothing was processed");
     }
 }

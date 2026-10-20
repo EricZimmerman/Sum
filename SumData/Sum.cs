@@ -25,7 +25,17 @@ namespace SumData
         /// </summary>
         /// <exception cref="DirectoryNotFoundException">The directory does not exist</exception>
         /// <exception cref="FileNotFoundException">Neither SystemIdentity.mdb nor Current.mdb is in the directory</exception>
-        public Sum(string directory)
+        public Sum(string directory) : this(directory, null)
+        {
+        }
+
+        /// <summary>
+        ///     As <see cref="Sum(string)" />, with the copies made in a new folder in <paramref name="tempDirectory" />
+        ///     (which must exist; null: the system's temporary folder), deleted when done
+        /// </summary>
+        /// <exception cref="DirectoryNotFoundException">The directory does not exist</exception>
+        /// <exception cref="FileNotFoundException">Neither SystemIdentity.mdb nor Current.mdb is in the directory</exception>
+        public Sum(string directory, string tempDirectory)
         {
             //https://docs.microsoft.com/en-us/previous-versions/windows/desktop/ual/msftual-hyperv
             //SystemIdentity.mdb: SYSTEM_IDENTITY (os info), ROLE_IDS (role guids), CHAINED_DATABASES (a database per year)
@@ -54,7 +64,7 @@ namespace SumData
                 throw new FileNotFoundException($"Neither '{SystemIdentityName}' nor '{CurrentName}' was found in '{directory}'!");
             }
 
-            using var ws = EseWorkspace.Create(directory, mdbFiles, "Svc", AddWarning);
+            using var ws = EseWorkspace.Create(directory, mdbFiles, "Svc", AddWarning, tempDirectory);
 
             if (sysIdent != null)
             {
@@ -562,7 +572,13 @@ namespace SumData
         /// <summary>
         ///     Writes the tables and columns of an ESE database to the console (read from a copy)
         /// </summary>
-        public static void DumpTableInfo(string fileName)
+        public static void DumpTableInfo(string fileName) => DumpTableInfo(fileName, null);
+
+        /// <summary>
+        ///     As <see cref="DumpTableInfo(string)" />, with the copy made in a new folder in <paramref name="tempDirectory" />
+        ///     (null: the system's temporary folder)
+        /// </summary>
+        public static void DumpTableInfo(string fileName, string tempDirectory)
         {
             if (File.Exists(fileName) == false)
             {
@@ -570,7 +586,7 @@ namespace SumData
             }
 
             var full = Path.GetFullPath(fileName);
-            using var ws = EseWorkspace.Create(Path.GetDirectoryName(full), new[] {full}, "Svc", m => Log.Warning("{Message}", m));
+            using var ws = EseWorkspace.Create(Path.GetDirectoryName(full), new[] {full}, "Svc", m => Log.Warning("{Message}", m), tempDirectory);
             var copy = Path.Combine(ws.WorkDirectory, Path.GetFileName(full));
             var dbid = ws.OpenDatabase(copy);
 
