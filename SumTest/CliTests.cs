@@ -123,14 +123,45 @@ public class CliTests
         Run().ExitCode.Should().Be(1, "-d is required");
         Run("-d", Path.Combine(_dir, "missing"), "--csv", Path.Combine(_dir, "out")).ExitCode.Should().Be(1);
         Run("-d", Path.Combine(_dir, "sum")).ExitCode.Should().Be(1, "--csv is required");
-        Run("-d", Path.Combine(_dir, "sum"), "--csv", Path.Combine(_dir, "out")).ExitCode.Should().Be(1, "there are no databases");
+        Run("-d", Path.Combine(_dir, "sum"), "--csv", Path.Combine(_dir, "out")).ExitCode.Should().Be(0, "there are no databases: nothing to do");
 
+        //a damaged database is reported, but it is not a failure of SumECmd
         Databases();
         File.WriteAllBytes(Path.Combine(_dir, "sum", "Current.mdb"), new byte[8192]);
         var (code, output) = Run("-d", Path.Combine(_dir, "sum"), "--csv", Path.Combine(_dir, "out"));
-        code.Should().Be(1, "Current.mdb can't be opened");
-        output.Should().Contain("Current.mdb");
+        code.Should().Be(0, output);
+        output.Should().Contain("Current.mdb' could not be opened");
         Directory.GetFiles(Path.Combine(_dir, "out"), "*SystemIdentInfo*").Should().ContainSingle("what could be read is exported");
+    }
+
+    [Test]
+    public void CsvThatCantBeWrittenFails()
+    {
+        Databases();
+        //--csv names a file, so the folder can't be created
+        var file = Path.Combine(_dir, "a file");
+        File.WriteAllText(file, "x");
+
+        var (code, output) = Run("-d", Path.Combine(_dir, "sum"), "--csv", file);
+
+        code.Should().Be(1, output);
+        output.Should().Contain("Error exporting data");
+    }
+
+    [Test]
+    public void LockedDatabaseFails()
+    {
+        //a database SumECmd can't read is a failure (1), unlike a damaged one
+        Databases();
+        var db = Path.Combine(_dir, "sum", "Current.mdb");
+
+        using (new FileStream(db, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var (code, output) = Run("-d", Path.Combine(_dir, "sum"), "--csv", Path.Combine(_dir, "out"));
+
+            code.Should().Be(1, output);
+            output.Should().Contain("Current.mdb");
+        }
     }
     [Test]
     public void CopiesGoToTempNextToTheProgram()

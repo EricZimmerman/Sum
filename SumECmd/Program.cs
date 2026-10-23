@@ -122,7 +122,10 @@ internal class Program
         return exitCode;
     }
 
-    /// <returns>0 on success; 1 for invalid arguments, a database that is missing or could not be read, or an export that failed</returns>
+    /// <returns>
+    ///     0 when SumECmd did its job, including databases that are missing or damaged (they are reported); 1 for invalid
+    ///     arguments, a missing -d folder, files it could not read (access denied, locked, IO errors) or an export that failed
+    /// </returns>
     private static int DoWork(string d, string csv,bool wd, string dt, string temp, bool debug, bool trace)
     {
         var levelSwitch = new LoggingLevelSwitch();
@@ -234,15 +237,17 @@ internal class Program
         }
         catch (FileNotFoundException fe)
         {
+            //neither SystemIdentity.mdb nor Current.mdb: nothing to do
             Log.Error("{Message}",fe.Message);
             Console.WriteLine();
-            return 1;
+            return 0;
         }
         catch (Exception e)
         {
             Log.Error(e,"Error processing '{D}'! Message: {Message}",d,e.Message);
             Console.WriteLine();
-            return 1;
+            //files that could not be read (access denied, locked, IO errors) are a failure; damaged databases are not
+            return e is IOException or UnauthorizedAccessException ? 1 : 0;
         }
 
         if (sd.FailedDatabases.Count > 0 && sd.ParseErrors.Any(t => t.Contains("could not be opened")))
@@ -307,7 +312,8 @@ internal class Program
         Log.Information("Processing completed in {TotalSeconds:N4} seconds",sw.Elapsed.TotalSeconds);
         Console.WriteLine();
 
-        return sd.FailedDatabases.Count > 0 || exportFailed ? 1 : 0;
+        //databases that are missing or could not be opened (damaged) are reported above, but are not a failure of SumECmd
+        return exportFailed ? 1 : 0;
     }
 
     private static CsvWriter GetCsvWriter(string tableName, string csv)
