@@ -242,12 +242,19 @@ internal class Program
             Console.WriteLine();
             return 0;
         }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            //files or folders that could not be read (access denied, locked, IO errors) are a failure; the message names the path, a stack trace adds nothing
+            Log.Error("Error processing '{D}'! Message: {Message}",d,e.Message);
+            Console.WriteLine();
+            return 1;
+        }
         catch (Exception e)
         {
             Log.Error(e,"Error processing '{D}'! Message: {Message}",d,e.Message);
             Console.WriteLine();
-            //files that could not be read (access denied, locked, IO errors) are a failure; damaged databases are not
-            return e is IOException or UnauthorizedAccessException ? 1 : 0;
+            //damaged databases are not a failure of the tool
+            return 0;
         }
 
         if (sd.FailedDatabases.Count > 0 && sd.ParseErrors.Any(t => t.Contains("could not be opened")))
