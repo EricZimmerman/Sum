@@ -118,6 +118,30 @@ public class CliTests
     }
 
     [Test]
+    public void ConsoleLog()
+    {
+        //Issues #259: --co saves the console messages to <yyyyMMddHHmmss>_SumECmd_<version>_ConsoleLog.txt in the --csv directory
+        Databases();
+        var csv = Path.Combine(_dir, "out");
+
+        var (code, output) = Run("-d", Path.Combine(_dir, "sum"), "--csv", csv);
+        code.Should().Be(0, output);
+        Directory.GetFiles(csv, "*_ConsoleLog.txt").Should().BeEmpty("--co is off by default");
+        output.Should().NotContain("Console log:");
+
+        (code, output) = Run("-d", Path.Combine(_dir, "sum"), "--csv", csv, "--co");
+        code.Should().Be(0, output);
+        var log = Directory.GetFiles(csv, "*_ConsoleLog.txt").Should().ContainSingle().Subject;
+        Path.GetFileName(log).Should().MatchRegex(@"^\d{14}_SumECmd_\d+\.\d+\.\d+_ConsoleLog\.txt$");
+        output.Should().Contain("Console log: " + log);
+        var text = File.ReadAllText(log);
+        text.Should().MatchRegex(@"\[\d\d:\d\d:\d\d\.\d{3} INF\] SumECmd version ");
+        text.Should().Contain("Command line: -d ");
+        //the same time as the CSVs' names
+        Directory.GetFiles(csv, Path.GetFileName(log)[..14] + "_SumECmd_DETAIL_Clients_Output.csv").Should().HaveCount(1, "the CSVs and the log have the same time");
+    }
+
+    [Test]
     public void ExitCodes()
     {
         Run().ExitCode.Should().Be(1, "-d is required");

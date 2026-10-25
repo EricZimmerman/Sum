@@ -6,7 +6,7 @@ access counts, DNS and virtual machine information. Results are exported to CSV.
 
 | | |
 |---|---|
-| **Version** | 2026.10.0 |
+| **Version** | 2026.10.1 |
 | **Download** | [.NET 10](https://download.ericzimmermanstools.com/net/SumECmd.zip) (recommended) &middot; [.NET Framework 4.7.2](https://download.ericzimmermanstools.com/SumECmd.zip) |
 | **All tools** | [ericzimmerman.github.io](https://ericzimmerman.github.io) or [Get-ZimmermanTools](https://download.ericzimmermanstools.com/Get-ZimmermanTools.zip), which downloads them all and keeps them current |
 | **Changes** | [ChangeLog](https://ericzimmerman.github.io/changelog/) |
@@ -32,6 +32,7 @@ Options:
   --temp <temp>   Folder for the temporary copies of the UAL databases and their transaction logs, which are opened instead of the evidence and deleted when done. Default: a Temp folder next to SumECmd. A folder that isn't there is created, and removed again when done. If that folder can't be written to, SumECmd stops: give a writable folder with --temp
   --debug         Show debug information during processing
   --trace         Show trace information during processing
+  --co            Save all console messages to <timestamp>_SumECmd_<version>_ConsoleLog.txt in the --csv directory
   -?, -h, --help  Show help and usage information
   --version       Show version information
 ```
@@ -97,6 +98,7 @@ There is no need to repair anything by hand any more. `esentutl.exe /mh <dbname>
 - `SystemIdentInfo` has the host and domain name, manufacturer, model, serial numbers, last boot, time zone, processors
   and memory, as new columns at the end.
 - New `--temp`. Exit code 1 when the tool fails (it was always 0). Error reports include source file and line numbers.
+- `--co` saves all console messages to `<yyyyMMddHHmmss>_SumECmd_<version>_ConsoleLog.txt` in the `--csv` directory, with the same time (UTC) as the CSV names (Issues #259) (2026.10.1).
 
 The full list is in the [ChangeLog](https://ericzimmerman.github.io/changelog/).
 
