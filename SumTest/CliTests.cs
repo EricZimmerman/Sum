@@ -118,6 +118,54 @@ public class CliTests
     }
 
     [Test]
+    public void RecursivelyFindsDatabasesBelowTheSourceDirectory()
+    {
+        Databases();
+        var sum = Path.Combine(_dir, "sum");
+        var nested = Directory.CreateDirectory(Path.Combine(sum, "nested", "ual")).FullName;
+        foreach (var file in Directory.GetFiles(sum))
+        {
+            File.Move(file, Path.Combine(nested, Path.GetFileName(file)));
+        }
+
+        var csv = Path.Combine(_dir, "out");
+        var (code, output) = Run("-d", sum, "--csv", csv);
+
+        code.Should().Be(0, output);
+        Csv(csv, "DETAIL_Clients").Should().ContainSingle(line => line.Contains("CORP\\alice"));
+    }
+
+    [Test]
+    public void WritesEachDiscoveredFolderToItsOwnCsvSet()
+    {
+        Databases();
+        var sum = Path.Combine(_dir, "sum");
+        var nested = Directory.CreateDirectory(Path.Combine(sum, "nested", "ual")).FullName;
+        foreach (var file in Directory.GetFiles(sum))
+        {
+            File.Copy(file, Path.Combine(nested, Path.GetFileName(file)));
+        }
+
+        var csv = Path.Combine(_dir, "out");
+        var (code, output) = Run("-d", sum, "--csv", csv);
+
+        code.Should().Be(0, output);
+        Directory.GetDirectories(csv).Should().BeEmpty("all CSVs go into the requested destination");
+        var summaryFiles = Directory.GetFiles(csv, "*_SumECmd_SUMMARY_SystemIdentInfo_Output.csv");
+        summaryFiles.Should().HaveCount(2);
+        summaryFiles.Select(file => Path.GetFileName(file).Split(new[] {"_SumECmd"}, StringSplitOptions.None)[0])
+            .Distinct().Should().HaveCount(2);
+        summaryFiles.Select(file => Path.GetFileName(file).Split(new[] {"_SumECmd"}, StringSplitOptions.None)[0])
+            .Should().OnlyContain(timestamp => timestamp.Length == 17 && timestamp.All(char.IsDigit));
+        summaryFiles.Select(File.ReadAllLines).Should().OnlyContain(lines => lines.Length == 2);
+
+        var clientFiles = Directory.GetFiles(csv, "*_SumECmd_DETAIL_Clients_Output.csv");
+        clientFiles.Should().HaveCount(2);
+        clientFiles.Select(File.ReadAllLines).Should()
+            .OnlyContain(lines => lines.Length == 2 && lines[1].Contains("CORP\\alice"));
+    }
+
+    [Test]
     public void ConsoleLog()
     {
         //Issues #259: --co (on by default) saves the console messages to <yyyyMMddHHmmss>_SumECmd_<version>_ConsoleLog.txt in the --csv directory
@@ -137,8 +185,8 @@ public class CliTests
         var text = File.ReadAllText(log);
         text.Should().MatchRegex(@"\[\d\d:\d\d:\d\d\.\d{3} INF\] SumECmd version ");
         text.Should().Contain("Command line: -d ");
-        //the same time as the CSVs' names
-        Directory.GetFiles(csv, Path.GetFileName(log)[..14] + "_SumECmd_DETAIL_Clients_Output.csv").Should().HaveCount(1, "the CSVs and the log have the same time");
+        var clients = Directory.GetFiles(csv, "*_SumECmd_DETAIL_Clients_Output.csv").Should().ContainSingle().Subject;
+        Path.GetFileName(clients).Should().MatchRegex(@"^\d{17}_SumECmd_DETAIL_Clients_Output\.csv$");
     }
 
     [Test]

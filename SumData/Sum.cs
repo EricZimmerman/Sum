@@ -18,13 +18,13 @@ namespace SumData
         private const string CurrentName = "Current.mdb";
 
         /// <summary>
-        ///     Reads the User Access Logging databases in <paramref name="directory" />: SystemIdentity.mdb, Current.mdb and
-        ///     the chained (yearly) databases. They are read from copies in a temporary folder (see
+        ///     Recursively reads User Access Logging databases under <paramref name="directory" />: SystemIdentity.mdb,
+        ///     Current.mdb and the chained (yearly) databases in each database's directory. They are read from copies in a temporary folder (see
         ///     <see cref="EseWorkspace" />), so nothing in <paramref name="directory" /> changes. A database or a row that
         ///     can't be read is reported in <see cref="ParseErrors" /> and the rest is kept
         /// </summary>
         /// <exception cref="DirectoryNotFoundException">The directory does not exist</exception>
-        /// <exception cref="FileNotFoundException">Neither SystemIdentity.mdb nor Current.mdb is in the directory</exception>
+        /// <exception cref="FileNotFoundException">Neither SystemIdentity.mdb nor Current.mdb is under the directory</exception>
         public Sum(string directory) : this(directory, null)
         {
         }
@@ -34,8 +34,20 @@ namespace SumData
         ///     (which must exist; null: the system's temporary folder), deleted when done
         /// </summary>
         /// <exception cref="DirectoryNotFoundException">The directory does not exist</exception>
-        /// <exception cref="FileNotFoundException">Neither SystemIdentity.mdb nor Current.mdb is in the directory</exception>
-        public Sum(string directory, string tempDirectory)
+        /// <exception cref="FileNotFoundException">Neither SystemIdentity.mdb nor Current.mdb is under the directory</exception>
+        public Sum(string directory, string tempDirectory) : this(directory, tempDirectory, true)
+        {
+        }
+
+        /// <summary>
+        ///     Reads the databases in <paramref name="directory" />, optionally searching its subdirectories
+        /// </summary>
+        /// <param name="directory">The directory to read</param>
+        /// <param name="tempDirectory">Where database copies are made (null: the system's temporary folder)</param>
+        /// <param name="recursive">When true, searches all subdirectories</param>
+        /// <exception cref="DirectoryNotFoundException">The directory does not exist</exception>
+        /// <exception cref="FileNotFoundException">Neither SystemIdentity.mdb nor Current.mdb is in the searched directories</exception>
+        public Sum(string directory, string tempDirectory, bool recursive)
         {
             //https://docs.microsoft.com/en-us/previous-versions/windows/desktop/ual/msftual-hyperv
             //SystemIdentity.mdb: SYSTEM_IDENTITY (os info), ROLE_IDS (role guids), CHAINED_DATABASES (a database per year)
@@ -54,15 +66,50 @@ namespace SumData
                 throw new DirectoryNotFoundException($"Directory '{directory}' not found!");
             }
 
-            var mdbFiles = Directory.GetFiles(directory, "*.mdb");
+            var databaseDirectories = FindDatabaseFiles(directory, recursive);
 
+            if (databaseDirectories.Count == 0)
+            {
+                throw new FileNotFoundException($"Neither '{SystemIdentityName}' nor '{CurrentName}' was found under '{directory}'!");
+            }
+
+            foreach (var databaseFiles in databaseDirectories)
+            {
+                ProcessDirectory(databaseFiles.Directory, databaseFiles.Files, tempDirectory);
+            }
+        }
+
+        /// <summary>
+        ///     Finds directories under <paramref name="directory" /> containing SystemIdentity.mdb or Current.mdb
+        /// </summary>
+        /// <exception cref="DirectoryNotFoundException">The directory does not exist</exception>
+        public static IReadOnlyList<string> FindDatabaseDirectories(string directory)
+        {
+            if (Directory.Exists(directory) == false)
+            {
+                throw new DirectoryNotFoundException($"Directory '{directory}' not found!");
+            }
+
+            return FindDatabaseFiles(directory, true).Select(files => files.Directory).ToList();
+        }
+
+        private static List<(string Directory, List<string> Files)> FindDatabaseFiles(string directory, bool recursive)
+        {
+            var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+            return Directory.GetFiles(directory, "*", searchOption)
+                .Where(f => Path.GetExtension(f).Equals(".mdb", StringComparison.OrdinalIgnoreCase))
+                .GroupBy(Path.GetDirectoryName, StringComparer.OrdinalIgnoreCase)
+                .Where(files => files.Any(f => Path.GetFileName(f).Equals(SystemIdentityName, StringComparison.OrdinalIgnoreCase) ||
+                                               Path.GetFileName(f).Equals(CurrentName, StringComparison.OrdinalIgnoreCase)))
+                .Select(files => (Directory: files.Key, Files: files.ToList()))
+                .ToList();
+        }
+
+        private void ProcessDirectory(string directory, List<string> mdbFiles, string tempDirectory)
+        {
             var sysIdent = mdbFiles.FirstOrDefault(f => Path.GetFileName(f).Equals(SystemIdentityName, StringComparison.OrdinalIgnoreCase));
             var currentDb = mdbFiles.FirstOrDefault(f => Path.GetFileName(f).Equals(CurrentName, StringComparison.OrdinalIgnoreCase));
-
-            if (sysIdent == null && currentDb == null)
-            {
-                throw new FileNotFoundException($"Neither '{SystemIdentityName}' nor '{CurrentName}' was found in '{directory}'!");
-            }
+            var chainedDbStart = ChainedDbs.Count;
 
             using var ws = EseWorkspace.Create(directory, mdbFiles, "Svc", AddWarning, tempDirectory);
 
@@ -89,7 +136,8 @@ namespace SumData
                 FailedDatabases.Add(Path.Combine(directory, CurrentName));
             }
 
-            foreach (var chainedDbInfo in ChainedDbs)
+            var directoryChainedDbs = ChainedDbs.Skip(chainedDbStart).ToList();
+            foreach (var chainedDbInfo in directoryChainedDbs)
             {
                 var chainFile = mdbFiles.FirstOrDefault(f => Path.GetFileName(f).Equals(chainedDbInfo.FileName, StringComparison.OrdinalIgnoreCase));
 
@@ -109,7 +157,7 @@ namespace SumData
                 var name = Path.GetFileName(other);
                 if (name.Equals(SystemIdentityName, StringComparison.OrdinalIgnoreCase) ||
                     name.Equals(CurrentName, StringComparison.OrdinalIgnoreCase) ||
-                    ChainedDbs.Any(c => c.FileName.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                    directoryChainedDbs.Any(c => c.FileName.Equals(name, StringComparison.OrdinalIgnoreCase)))
                 {
                     continue;
                 }

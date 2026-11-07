@@ -106,6 +106,47 @@ public class SumTests
     }
 
     [Test]
+    public void RecursivelyFindsCaseInsensitiveAnchorsAndLocalChainedDatabases()
+    {
+        StandardFolder();
+        var nestedDirectory = Directory.CreateDirectory(Path.Combine(_dir, "nested", "ual")).FullName;
+        foreach (var file in Directory.GetFiles(_dir))
+        {
+            File.Move(file, Path.Combine(nestedDirectory, Path.GetFileName(file)));
+        }
+
+        File.Move(Path.Combine(nestedDirectory, "SystemIdentity.mdb"), Path.Combine(nestedDirectory, "systemidentity.MDB"));
+        File.Move(Path.Combine(nestedDirectory, "Current.mdb"), Path.Combine(nestedDirectory, "current.MDB"));
+        var otherDirectory = Directory.CreateDirectory(Path.Combine(_dir, "other", "ual")).FullName;
+        foreach (var file in Directory.GetFiles(nestedDirectory))
+        {
+            File.Copy(file, Path.Combine(otherDirectory, Path.GetFileName(file)));
+        }
+
+        var sum = new Sum(_dir);
+
+        sum.ParseErrors.Should().BeEmpty();
+        sum.FailedDatabases.Should().BeEmpty();
+        sum.ChainedDbs.Should().HaveCount(2);
+        sum.ProcessedDatabases.Should().HaveCount(4);
+        sum.ProcessedDatabases.Should().OnlyContain(d => Path.GetDirectoryName(d.FileName) == nestedDirectory ||
+                                                          Path.GetDirectoryName(d.FileName) == otherDirectory);
+        sum.ProcessedDatabases.Where(d => Path.GetFileName(d.FileName).Equals(ChainedName, StringComparison.OrdinalIgnoreCase))
+            .Should().OnlyContain(d => d.Year == 2019).And.HaveCount(2);
+    }
+
+    [Test]
+    public void FindsDatabaseDirectoriesRecursivelyAndCaseInsensitively()
+    {
+        var systemIdentityDirectory = Directory.CreateDirectory(Path.Combine(_dir, "one", "ual")).FullName;
+        var currentDirectory = Directory.CreateDirectory(Path.Combine(_dir, "two", "ual")).FullName;
+        File.WriteAllBytes(Path.Combine(systemIdentityDirectory, "systemidentity.MDB"), Array.Empty<byte>());
+        File.WriteAllBytes(Path.Combine(currentDirectory, "CURRENT.mdb"), Array.Empty<byte>());
+
+        Sum.FindDatabaseDirectories(_dir).Should().BeEquivalentTo(systemIdentityDirectory, currentDirectory);
+    }
+
+    [Test]
     public void CurrentDayDatesUseTheYearOfTheData()
     {
         //they were dated in the year of the machine running SumECmd
