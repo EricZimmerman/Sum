@@ -62,7 +62,7 @@ internal class Program
 
         var dOpt = new Option<string>("-d")
         {
-            Description = "Directory to process, looking for SystemIdentity.mdb, Current.mdb, etc. Required.\r\n"
+            Description = "Directory to search recursively for SystemIdentity.mdb, Current.mdb and their chained databases. Required.\r\n"
         };
 
         var csvOpt = new Option<string>("--csv")
@@ -218,7 +218,23 @@ internal class Program
         var sw = new Stopwatch();
         sw.Start();
 
-        Sum sd;
+        IReadOnlyList<string> sourceDirectories;
+        try
+        {
+            sourceDirectories = Sum.FindDatabaseDirectories(d);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Log.Error("Error searching '{D}'! Message: {Message}", d, e.Message);
+            Console.WriteLine();
+            return 1;
+        }
+
+        if (sourceDirectories.Count == 0)
+        {
+            Log.Information("No User Access Logging databases found under '{D}'", d);
+            return 0;
+        }
 
         //the databases are read from copies, made in --temp or Temp next to SumECmd (never the user's %TEMP%)
         var tempFolder = TempFolder.Prepare(temp, out var tempCreated, out var tempError);
@@ -229,14 +245,18 @@ internal class Program
             return 1;
         }
 
+        var parsedSums = new List<(string Directory, Sum Data)>();
         try
         {
-            Log.Information("Processing '{D}'...",d);
+            Log.Information("Searching '{D}' recursively for User Access Logging databases...", d);
             Console.WriteLine();
-            //the databases are read from copies in the temporary folder: nothing in -d is changed
             try
             {
-                sd = new Sum(d, tempFolder);
+                foreach (var sourceDirectory in sourceDirectories)
+                {
+                    Log.Information("Processing '{SourceDirectory}'...", sourceDirectory);
+                    parsedSums.Add((sourceDirectory, new Sum(sourceDirectory, tempFolder, false)));
+                }
             }
             finally
             {
@@ -247,10 +267,13 @@ internal class Program
             Console.WriteLine();
             Log.Information("Summary info:");
 
-            Log.Information("{Role} {RoleInfosCount:N0}","Role info count:".PadRight(30),sd.RoleInfos.Count);
-            Log.Information("{SystemIdentity} {SystemIdentityInfosCount:N0}","System Identity info count:".PadRight(30),sd.SystemIdentityInfos.Count);
-            Log.Information("{ChainedDb} {ChainedDbsCount:N0}","Chained DB info count:".PadRight(30),sd.ChainedDbs.Count);
-            Log.Information("{ProcessedDb} {ProcessedDatabasesCount:N0}","Processed DB info count:".PadRight(30),sd.ProcessedDatabases.Count);
+            foreach (var (sourceDirectory, sd) in parsedSums)
+            {
+                Log.Information("'{SourceDirectory}': {Role} {RoleInfosCount:N0}", sourceDirectory, "Role info count:".PadRight(30), sd.RoleInfos.Count);
+                Log.Information("'{SourceDirectory}': {SystemIdentity} {SystemIdentityInfosCount:N0}", sourceDirectory, "System Identity info count:".PadRight(30), sd.SystemIdentityInfos.Count);
+                Log.Information("'{SourceDirectory}': {ChainedDb} {ChainedDbsCount:N0}", sourceDirectory, "Chained DB info count:".PadRight(30), sd.ChainedDbs.Count);
+                Log.Information("'{SourceDirectory}': {ProcessedDb} {ProcessedDatabasesCount:N0}", sourceDirectory, "Processed DB info count:".PadRight(30), sd.ProcessedDatabases.Count);
+            }
 
             Console.WriteLine();
         }
@@ -276,21 +299,24 @@ internal class Program
             return 0;
         }
 
-        if (sd.FailedDatabases.Count > 0 && sd.ParseErrors.Any(t => t.Contains("could not be opened")))
+        foreach (var (sourceDirectory, sd) in parsedSums)
         {
-            Log.Information("A database that still can't be opened may be damaged beyond what 'esentutl.exe /p' (run on a copy) can repair. 'esentutl.exe /mh <dbname>.mdb' shows its state");
-            Console.WriteLine();
-        }
-
-        if (sd.ProcessedDatabases.Count > 0)
-        {
-            Log.Information("The following databases were processed:");
-            foreach (var sdProcessedDatabase in sd.ProcessedDatabases)
+            if (sd.FailedDatabases.Count > 0 && sd.ParseErrors.Any(t => t.Contains("could not be opened")))
             {
-                Log.Information("\t{FileName} (year {Year}, from {YearSource})",sdProcessedDatabase.FileName,sdProcessedDatabase.Year,sdProcessedDatabase.YearSource);
+                Log.Information("A database in '{SourceDirectory}' that still can't be opened may be damaged beyond what 'esentutl.exe /p' (run on a copy) can repair. 'esentutl.exe /mh <dbname>.mdb' shows its state", sourceDirectory);
+                Console.WriteLine();
             }
 
-            Console.WriteLine();
+            if (sd.ProcessedDatabases.Count > 0)
+            {
+                Log.Information("The following databases were processed from '{SourceDirectory}':", sourceDirectory);
+                foreach (var sdProcessedDatabase in sd.ProcessedDatabases)
+                {
+                    Log.Information("\t{FileName} (year {Year}, from {YearSource})", sdProcessedDatabase.FileName, sdProcessedDatabase.Year, sdProcessedDatabase.YearSource);
+                }
+
+                Console.WriteLine();
+            }
         }
 
         Log.Information("Exporting data...");
@@ -304,11 +330,24 @@ internal class Program
                 Directory.CreateDirectory(csv);
             }
 
-            exportFailed |= !ExportSystemIdentity(sd,csv,dt);
-            exportFailed |= !ExportSystemRole(sd,csv);
-            exportFailed |= !ExportChainedDb(sd,csv);
+            var lastTimestampMilliseconds = long.MinValue;
+            foreach (var (sourceDirectory, sd) in parsedSums)
+            {
+                var timestampMilliseconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                if (timestampMilliseconds <= lastTimestampMilliseconds)
+                {
+                    timestampMilliseconds = lastTimestampMilliseconds + 1;
+                }
 
-            ExportProcessedDetails(sd,csv,dt,wd);
+                _timestamp = DateTimeOffset.FromUnixTimeMilliseconds(timestampMilliseconds);
+                lastTimestampMilliseconds = timestampMilliseconds;
+                Log.Information("Exporting data from '{SourceDirectory}' to '{OutputDirectory}'...", sourceDirectory, csv);
+
+                exportFailed |= !ExportSystemIdentity(sd, csv, dt);
+                exportFailed |= !ExportSystemRole(sd, csv);
+                exportFailed |= !ExportChainedDb(sd, csv);
+                ExportProcessedDetails(sd, csv, dt, wd);
+            }
         }
         catch (Exception e)
         {
@@ -318,18 +357,21 @@ internal class Program
 
         sw.Stop();
 
-        if (sd.ParseErrors.Count > 0)
+        foreach (var (sourceDirectory, sd) in parsedSums)
         {
-            Console.WriteLine();
-            Log.Warning("{Count:N0} problem(s) found while reading the databases (everything else was exported):",sd.ParseErrors.Count);
-            foreach (var parseError in sd.ParseErrors.Take(50))
+            if (sd.ParseErrors.Count > 0)
             {
-                Log.Warning("\t{ParseError}",parseError);
-            }
+                Console.WriteLine();
+                Log.Warning("{Count:N0} problem(s) found while reading '{SourceDirectory}' (everything else was exported):", sd.ParseErrors.Count, sourceDirectory);
+                foreach (var parseError in sd.ParseErrors.Take(50))
+                {
+                    Log.Warning("\t{ParseError}", parseError);
+                }
 
-            if (sd.ParseErrors.Count > 50)
-            {
-                Log.Warning("\t... and {Count:N0} more (use --debug to see them all as they happen)",sd.ParseErrors.Count - 50);
+                if (sd.ParseErrors.Count > 50)
+                {
+                    Log.Warning("\t... and {Count:N0} more (use --debug to see them all as they happen)", sd.ParseErrors.Count - 50);
+                }
             }
         }
 
@@ -344,7 +386,7 @@ internal class Program
 
     private static CsvWriter GetCsvWriter(string tableName, string csv)
     {
-        var outName = $"{_timestamp:yyyyMMddHHmmss}_SumECmd_DETAIL_{tableName}_Output.csv";
+        var outName = $"{OutputFilePrefix}_SumECmd_DETAIL_{tableName}_Output.csv";
 
         var outFile = Path.Combine(csv, outName);
 
@@ -549,7 +591,7 @@ internal class Program
     {
         try
         {
-            var outName = $"{_timestamp:yyyyMMddHHmmss}_SumECmd_SUMMARY_{name}_Output.csv";
+            var outName = $"{OutputFilePrefix}_SumECmd_SUMMARY_{name}_Output.csv";
 
             var outFile = Path.Combine(csv, outName);
 
@@ -591,6 +633,8 @@ internal class Program
         return ExportSummary(sd.SystemIdentityInfos, csv, "SystemIdentInfo",
             map => map.Map(t => t.CreationTime).Convert(t => $"{t.Value.CreationTime.ToString(dt)}"));
     }
+
+    private static string OutputFilePrefix => $"{_timestamp:yyyyMMddHHmmssfff}";
 
     private class CustomHelpAction : SynchronousCommandLineAction
     {
