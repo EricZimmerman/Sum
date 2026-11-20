@@ -105,16 +105,86 @@ public class CliTests
 
         //the existing columns first, in their order (Timeline Explorer matches these headers); new ones at the end
         Csv(csv, "SUMMARY_SystemIdentInfo")[0].Should().StartWith("CreationTime,OsMajor,OsMinor,OsBuild,SystemDnsHostName,SystemDomainName,");
-        Csv(csv, "SUMMARY_RoleInfos")[0].Should().Be("RoleGuid,RoleName,ProductName");
-        Csv(csv, "SUMMARY_ChainedDbInfo")[0].Should().Be("Year,FileName");
+        Csv(csv, "SUMMARY_SystemIdentInfo")[0].Should().EndWith(",MaximumMemory,SourceDirectory");
+        Csv(csv, "SUMMARY_RoleInfos")[0].Should().Be("RoleGuid,RoleName,ProductName,SourceDirectory");
+        Csv(csv, "SUMMARY_ChainedDbInfo")[0].Should().Be("Year,FileName,SourceDirectory");
 
         var clients = Csv(csv, "DETAIL_Clients");
-        clients[0].Should().Be("RoleGuid,RoleDescription,AuthenticatedUserName,TotalAccesses,InsertDate,LastAccess,IpAddress,ClientName,TenantId,SourceFile");
-        clients[1].Should().Be("10a9226f-50ee-49d8-a393-9a501d47ce04,File Server,CORP\\alice,7,2020-01-02 12:00:00,2020-03-04 12:00:00,10.0.0.5,,00000000-0000-0000-0000-000000000000,Current.mdb");
+        clients[0].Should().Be("RoleGuid,RoleDescription,AuthenticatedUserName,TotalAccesses,InsertDate,LastAccess,IpAddress,ClientName,TenantId,SourceFile,SourceDirectory");
+        clients[1].Should().Be($"10a9226f-50ee-49d8-a393-9a501d47ce04,File Server,CORP\\alice,7,2020-01-02 12:00:00,2020-03-04 12:00:00,10.0.0.5,,00000000-0000-0000-0000-000000000000,Current.mdb,{Path.Combine(_dir, "sum")}");
 
         var detail = Csv(csv, "DETAIL_ClientsDetailed");
-        detail[0].Should().Be("Date,Count,DayNumber,RoleGuid,RoleDescription,AuthenticatedUserName,TotalAccesses,InsertDate,LastAccess,IpAddress,ClientName,TenantId,SourceFile");
+        detail[0].Should().Be("Date,Count,DayNumber,RoleGuid,RoleDescription,AuthenticatedUserName,TotalAccesses,InsertDate,LastAccess,IpAddress,ClientName,TenantId,SourceFile,SourceDirectory");
         detail[1].Should().StartWith("2020-01-02,4,2,", "Current.mdb's year comes from its data");
+    }
+
+    /// <summary>The databases of <see cref="Databases" /> in -d, under -d/nested/ual and under -d/other/ual</summary>
+    private string ThreeFolders()
+    {
+        Databases();
+        var sum = Path.Combine(_dir, "sum");
+        foreach (var sub in new[] {Path.Combine(sum, "nested", "ual"), Path.Combine(sum, "other", "ual")})
+        {
+            Directory.CreateDirectory(sub);
+            foreach (var file in Directory.GetFiles(sum))
+            {
+                File.Copy(file, Path.Combine(sub, Path.GetFileName(file)));
+            }
+        }
+
+        return sum;
+    }
+
+    [Test]
+    public void FindsDatabasesInSubfolders()
+    {
+        //Issues #265 (PR #12 by reece394): the databases need not be in -d itself
+        Databases();
+        var sum = Path.Combine(_dir, "sum");
+        var nested = Directory.CreateDirectory(Path.Combine(sum, "nested", "ual")).FullName;
+        foreach (var file in Directory.GetFiles(sum))
+        {
+            File.Move(file, Path.Combine(nested, Path.GetFileName(file)));
+        }
+
+        var csv = Path.Combine(_dir, "out");
+        var (code, output) = Run("-d", sum, "--csv", csv);
+
+        code.Should().Be(0, output);
+        Csv(csv, "DETAIL_Clients").Should().ContainSingle(line => line.Contains("CORP\\alice") && line.EndsWith($",Current.mdb,{nested}"));
+    }
+
+    [Test]
+    public void SeveralFoldersGoIntoOneSetOfCsvs()
+    {
+        var sum = ThreeFolders();
+        var csv = Path.Combine(_dir, "out");
+
+        var (code, output) = Run("-d", sum, "--csv", csv);
+
+        code.Should().Be(0, output);
+        output.Should().Contain("Found User Access Logging databases in 3 folders");
+        Directory.GetDirectories(csv).Should().BeEmpty();
+
+        var folders = new[] {sum, Path.Combine(sum, "nested", "ual"), Path.Combine(sum, "other", "ual")};
+        var identity = Csv(csv, "SUMMARY_SystemIdentInfo");
+        identity.Should().HaveCount(4, "a header and a row per folder");
+        Csv(csv, "DETAIL_Clients").Skip(1).Select(t => t.Split(',').Last()).Should().BeEquivalentTo(folders);
+        Csv(csv, "SUMMARY_RoleInfos").Skip(1).Select(t => t.Split(',').Last()).Should().BeEquivalentTo(folders);
+
+        //one run, one time: the CSVs and the console log share it
+        Directory.GetFiles(csv, "*_SumECmd_*").Select(t => Path.GetFileName(t)[..14]).Distinct().Should().ContainSingle();
+    }
+
+    [Test]
+    public void NoDatabasesAnywhereExits0()
+    {
+        var empty = Directory.CreateDirectory(Path.Combine(_dir, "empty", "sub")).Parent!.FullName;
+
+        var (code, output) = Run("-d", empty, "--csv", Path.Combine(_dir, "out"));
+
+        code.Should().Be(0, output);
+        output.Should().Contain("was found in or under");
     }
 
     [Test]

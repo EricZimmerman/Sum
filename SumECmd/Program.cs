@@ -62,7 +62,7 @@ internal class Program
 
         var dOpt = new Option<string>("-d")
         {
-            Description = "Directory to process, looking for SystemIdentity.mdb, Current.mdb, etc. Required.\r\n"
+            Description = "Directory to process, looking for SystemIdentity.mdb, Current.mdb, etc. in it and every folder under it (one set of CSVs, SourceDirectory says which folder a row is from). Required.\r\n"
         };
 
         var csvOpt = new Option<string>("--csv")
@@ -218,7 +218,30 @@ internal class Program
         var sw = new Stopwatch();
         sw.Start();
 
-        Sum sd;
+        //Issues #265: every folder under -d with a SystemIdentity.mdb or Current.mdb, each read on its own
+        var unreadable = new List<string>();
+        var folders = Sum.FindDatabaseDirectories(d, unreadable);
+        var failed = false;
+
+        foreach (var folder in unreadable)
+        {
+            Log.Error("Unable to read folder {Folder}",folder);
+            failed = true;
+        }
+
+        if (folders.Count == 0)
+        {
+            //nothing to do
+            Log.Error("Neither '{SystemIdentity}' nor '{Current}' was found in or under '{D}'!","SystemIdentity.mdb","Current.mdb",d);
+            Console.WriteLine();
+            return failed ? 1 : 0;
+        }
+
+        if (folders.Count > 1)
+        {
+            Log.Information("Found User Access Logging databases in {Count:N0} folders under '{D}'",folders.Count,d);
+            Console.WriteLine();
+        }
 
         //the databases are read from copies, made in --temp or Temp next to SumECmd (never the user's %TEMP%)
         var tempFolder = TempFolder.Prepare(temp, out var tempCreated, out var tempError);
@@ -229,63 +252,70 @@ internal class Program
             return 1;
         }
 
+        var sums = new List<Sum>();
+
         try
         {
-            Log.Information("Processing '{D}'...",d);
-            Console.WriteLine();
-            //the databases are read from copies in the temporary folder: nothing in -d is changed
-            try
+            foreach (var folder in folders)
             {
-                sd = new Sum(d, tempFolder);
+                Log.Information("Processing '{D}'...",folder);
+                Console.WriteLine();
+                //the databases are read from copies in the temporary folder: nothing in -d is changed
+                try
+                {
+                    sums.Add(new Sum(folder, tempFolder));
+                }
+                catch (FileNotFoundException fe)
+                {
+                    //gone since it was found
+                    Log.Error("{Message}",fe.Message);
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    //files or folders that could not be read (access denied, locked, IO errors) are a failure; the message names the path, a stack trace adds nothing
+                    Log.Error("Error processing '{D}'! Message: {Message}",folder,e.Message);
+                    failed = true;
+                }
+                catch (Exception e)
+                {
+                    //damaged databases are not a failure of the tool
+                    Log.Error(e,"Error processing '{D}'! Message: {Message}",folder,e.Message);
+                }
+
+                Console.WriteLine();
             }
-            finally
-            {
-                TempFolder.RemoveIfEmpty(tempFolder, tempCreated);
-            }
-            Console.WriteLine();
-            Log.Information("Processing complete!");
-            Console.WriteLine();
-            Log.Information("Summary info:");
-
-            Log.Information("{Role} {RoleInfosCount:N0}","Role info count:".PadRight(30),sd.RoleInfos.Count);
-            Log.Information("{SystemIdentity} {SystemIdentityInfosCount:N0}","System Identity info count:".PadRight(30),sd.SystemIdentityInfos.Count);
-            Log.Information("{ChainedDb} {ChainedDbsCount:N0}","Chained DB info count:".PadRight(30),sd.ChainedDbs.Count);
-            Log.Information("{ProcessedDb} {ProcessedDatabasesCount:N0}","Processed DB info count:".PadRight(30),sd.ProcessedDatabases.Count);
-
-            Console.WriteLine();
         }
-        catch (FileNotFoundException fe)
+        finally
         {
-            //neither SystemIdentity.mdb nor Current.mdb: nothing to do
-            Log.Error("{Message}",fe.Message);
-            Console.WriteLine();
-            return 0;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            //files or folders that could not be read (access denied, locked, IO errors) are a failure; the message names the path, a stack trace adds nothing
-            Log.Error("Error processing '{D}'! Message: {Message}",d,e.Message);
-            Console.WriteLine();
-            return 1;
-        }
-        catch (Exception e)
-        {
-            Log.Error(e,"Error processing '{D}'! Message: {Message}",d,e.Message);
-            Console.WriteLine();
-            //damaged databases are not a failure of the tool
-            return 0;
+            TempFolder.RemoveIfEmpty(tempFolder, tempCreated);
         }
 
-        if (sd.FailedDatabases.Count > 0 && sd.ParseErrors.Any(t => t.Contains("could not be opened")))
+        if (sums.Count == 0)
+        {
+            return failed ? 1 : 0;
+        }
+
+        Log.Information("Processing complete!");
+        Console.WriteLine();
+        Log.Information("Summary info:");
+
+        Log.Information("{Role} {RoleInfosCount:N0}","Role info count:".PadRight(30),sums.Sum(t => t.RoleInfos.Count));
+        Log.Information("{SystemIdentity} {SystemIdentityInfosCount:N0}","System Identity info count:".PadRight(30),sums.Sum(t => t.SystemIdentityInfos.Count));
+        Log.Information("{ChainedDb} {ChainedDbsCount:N0}","Chained DB info count:".PadRight(30),sums.Sum(t => t.ChainedDbs.Count));
+        Log.Information("{ProcessedDb} {ProcessedDatabasesCount:N0}","Processed DB info count:".PadRight(30),sums.Sum(t => t.ProcessedDatabases.Count));
+
+        Console.WriteLine();
+
+        if (sums.Any(sd => sd.FailedDatabases.Count > 0 && sd.ParseErrors.Any(t => t.Contains("could not be opened"))))
         {
             Log.Information("A database that still can't be opened may be damaged beyond what 'esentutl.exe /p' (run on a copy) can repair. 'esentutl.exe /mh <dbname>.mdb' shows its state");
             Console.WriteLine();
         }
 
-        if (sd.ProcessedDatabases.Count > 0)
+        if (sums.Any(t => t.ProcessedDatabases.Count > 0))
         {
             Log.Information("The following databases were processed:");
-            foreach (var sdProcessedDatabase in sd.ProcessedDatabases)
+            foreach (var sdProcessedDatabase in sums.SelectMany(t => t.ProcessedDatabases))
             {
                 Log.Information("\t{FileName} (year {Year}, from {YearSource})",sdProcessedDatabase.FileName,sdProcessedDatabase.Year,sdProcessedDatabase.YearSource);
             }
@@ -304,11 +334,12 @@ internal class Program
                 Directory.CreateDirectory(csv);
             }
 
-            exportFailed |= !ExportSystemIdentity(sd,csv,dt);
-            exportFailed |= !ExportSystemRole(sd,csv);
-            exportFailed |= !ExportChainedDb(sd,csv);
+            //one set of CSVs for all the folders; SourceDirectory (the last column) says where each row is from
+            exportFailed |= !ExportSystemIdentity(sums,csv,dt);
+            exportFailed |= !ExportSystemRole(sums,csv);
+            exportFailed |= !ExportChainedDb(sums,csv);
 
-            ExportProcessedDetails(sd,csv,dt,wd);
+            ExportProcessedDetails(sums,csv,dt,wd);
         }
         catch (Exception e)
         {
@@ -318,18 +349,19 @@ internal class Program
 
         sw.Stop();
 
-        if (sd.ParseErrors.Count > 0)
+        var parseErrors = sums.SelectMany(t => t.ParseErrors).ToList();
+        if (parseErrors.Count > 0)
         {
             Console.WriteLine();
-            Log.Warning("{Count:N0} problem(s) found while reading the databases (everything else was exported):",sd.ParseErrors.Count);
-            foreach (var parseError in sd.ParseErrors.Take(50))
+            Log.Warning("{Count:N0} problem(s) found while reading the databases (everything else was exported):",parseErrors.Count);
+            foreach (var parseError in parseErrors.Take(50))
             {
                 Log.Warning("\t{ParseError}",parseError);
             }
 
-            if (sd.ParseErrors.Count > 50)
+            if (parseErrors.Count > 50)
             {
-                Log.Warning("\t... and {Count:N0} more (use --debug to see them all as they happen)",sd.ParseErrors.Count - 50);
+                Log.Warning("\t... and {Count:N0} more (use --debug to see them all as they happen)",parseErrors.Count - 50);
             }
         }
 
@@ -339,7 +371,7 @@ internal class Program
         Console.WriteLine();
 
         //databases that are missing or could not be opened (damaged) are reported above, but are not a failure of SumECmd
-        return exportFailed ? 1 : 0;
+        return exportFailed || failed ? 1 : 0;
     }
 
     private static CsvWriter GetCsvWriter(string tableName, string csv)
@@ -357,7 +389,7 @@ internal class Program
         return csvWriter;
     }
 
-    private static void ExportProcessedDetails(Sum sd,string csv, string dt, bool wd)
+    private static void ExportProcessedDetails(List<Sum> sums,string csv, string dt, bool wd)
     {
         CsvWriter csvWriterClients = null;
         CsvWriter csvWriterClientsDetail = null;
@@ -368,8 +400,8 @@ internal class Program
         //(none of them was ever closed)
         try
         {
-            foreach (var sdProcessedDatabase in sd.ProcessedDatabases)
-            {
+            foreach (var (sd, sdProcessedDatabase) in sums.SelectMany(t => t.ProcessedDatabases.Select(db => (t, db))))
+{
                 Log.Information("Exporting Client info from '{FileName}'...",Path.GetFileName(sdProcessedDatabase.FileName));
                 foreach (var client in sdProcessedDatabase.Clients)
                 {
@@ -576,19 +608,19 @@ internal class Program
         }
     }
 
-    private static bool ExportChainedDb(Sum sd, string csv)
+    private static bool ExportChainedDb(List<Sum> sums, string csv)
     {
-        return ExportSummary(sd.ChainedDbs, csv, "ChainedDbInfo");
+        return ExportSummary(sums.SelectMany(t => t.ChainedDbs), csv, "ChainedDbInfo");
     }
 
-    private static bool ExportSystemRole(Sum sd, string csv)
+    private static bool ExportSystemRole(List<Sum> sums, string csv)
     {
-        return ExportSummary(sd.RoleInfos, csv, "RoleInfos");
+        return ExportSummary(sums.SelectMany(t => t.RoleInfos), csv, "RoleInfos");
     }
 
-    private static bool ExportSystemIdentity(Sum sd, string csv, string dt)
+    private static bool ExportSystemIdentity(List<Sum> sums, string csv, string dt)
     {
-        return ExportSummary(sd.SystemIdentityInfos, csv, "SystemIdentInfo",
+        return ExportSummary(sums.SelectMany(t => t.SystemIdentityInfos), csv, "SystemIdentInfo",
             map => map.Map(t => t.CreationTime).Convert(t => $"{t.Value.CreationTime.ToString(dt)}"));
     }
 

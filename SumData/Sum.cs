@@ -117,6 +117,105 @@ namespace SumData
                 Log.Information("Found '{Other}', not listed in CHAINED_DATABASES. Processing...", other);
                 ProcessDatabase(ws, other, null);
             }
+
+            SetSourceDirectory(directory);
+        }
+
+        /// <summary>Every row says which folder it was read from (several folders go into one set of CSVs, Issues #265)</summary>
+        private void SetSourceDirectory(string directory)
+        {
+            foreach (var si in SystemIdentityInfos)
+            {
+                si.SourceDirectory = directory;
+            }
+
+            foreach (var ri in RoleInfos)
+            {
+                ri.SourceDirectory = directory;
+            }
+
+            foreach (var cd in ChainedDbs)
+            {
+                cd.SourceDirectory = directory;
+            }
+
+            foreach (var db in ProcessedDatabases)
+            {
+                foreach (var client in db.Clients.Values.SelectMany(t => t))
+                {
+                    client.SourceDirectory = directory;
+                }
+
+                foreach (var dns in db.DnsInfo)
+                {
+                    dns.SourceDirectory = directory;
+                }
+
+                foreach (var role in db.RoleAccesses)
+                {
+                    role.SourceDirectory = directory;
+                }
+
+                foreach (var vm in db.VmInfo)
+                {
+                    vm.SourceDirectory = directory;
+                }
+            }
+        }
+
+        /// <summary>
+        ///     The folders under <paramref name="directory" /> (and itself) with a SystemIdentity.mdb or a Current.mdb (names
+        ///     compared ignoring case), sorted. Each can be read with <see cref="Sum(string, string)" />
+        /// </summary>
+        /// <exception cref="DirectoryNotFoundException">The directory does not exist</exception>
+        public static List<string> FindDatabaseDirectories(string directory)
+        {
+            return FindDatabaseDirectories(directory, new List<string>());
+        }
+
+        /// <summary>As <see cref="FindDatabaseDirectories(string)" />; folders that can't be read are added to <paramref name="unreadable" /> ("path: reason") and skipped</summary>
+        /// <exception cref="DirectoryNotFoundException">The directory does not exist</exception>
+        public static List<string> FindDatabaseDirectories(string directory, List<string> unreadable)
+        {
+            if (Directory.Exists(directory) == false)
+            {
+                throw new DirectoryNotFoundException($"Directory '{directory}' not found!");
+            }
+
+            var found = new List<string>();
+            var pending = new Stack<string>();
+            pending.Push(directory);
+
+            while (pending.Count > 0)
+            {
+                var current = pending.Pop();
+                string[] files;
+                string[] subDirs;
+                try
+                {
+                    files = Directory.GetFiles(current);
+                    subDirs = Directory.GetDirectories(current);
+                }
+                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+                {
+                    unreadable?.Add($"{current}: {e.Message}");
+                    continue;
+                }
+
+                if (files.Any(f => Path.GetFileName(f).Equals(SystemIdentityName, StringComparison.OrdinalIgnoreCase) ||
+                                   Path.GetFileName(f).Equals(CurrentName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    found.Add(current);
+                }
+
+                foreach (var sub in subDirs)
+                {
+                    pending.Push(sub);
+                }
+            }
+
+            found.Sort(StringComparer.OrdinalIgnoreCase);
+            return found;
         }
 
         public string GetRoleDescFromGuid(Guid roleGuid)
@@ -719,6 +818,7 @@ namespace SumData
             Date = dayEntry.Date;
             Count = dayEntry.Count;
             SourceFile = clientEntry.SourceFile;
+            SourceDirectory = clientEntry.SourceDirectory;
             RoleDescription = clientEntry.RoleDescription;
             RoleGuid = clientEntry.RoleGuid;
         }
@@ -771,6 +871,10 @@ namespace SumData
 
 
         public string SourceFile { get;set; }
+
+
+        /// <summary>The folder this row was read from (2026.11)</summary>
+        public string SourceDirectory { get; internal set; }
 
         public override string ToString()
         {
@@ -844,6 +948,10 @@ namespace SumData
 
         public string SourceFile { get;set; }
 
+
+        /// <summary>The folder this row was read from (2026.11)</summary>
+        public string SourceDirectory { get; internal set; }
+
         public override string ToString()
         {
             return $"VM Guid: {VmGuid} Created: {CreationTime:yyyy-MM-dd HH:mm:ss.fffffff} Last Seen: {LastSeenActive:yyyy-MM-dd HH:mm:ss.fffffff} BIOS Guid: {BiosGuid}";
@@ -874,6 +982,10 @@ namespace SumData
 
 
 
+
+        /// <summary>The folder this row was read from (2026.11)</summary>
+        public string SourceDirectory { get; internal set; }
+
         public override string ToString()
         {
             return $"Role Guid: {RoleGuid} First Seen: {FirstSeen:yyyy-MM-dd HH:mm:ss.fffffff} Last Seen: {LastSeen:yyyy-MM-dd HH:mm:ss.fffffff}";
@@ -897,6 +1009,10 @@ namespace SumData
 
         public string SourceFile { get;set; }
 
+
+        /// <summary>The folder this row was read from (2026.11)</summary>
+        public string SourceDirectory { get; internal set; }
+
         public override string ToString()
         {
             return $"Host Name: {HostName} --> {Address} Last Seen: {LastSeen:yyyy-MM-dd HH:mm:ss.fffffff}";
@@ -913,6 +1029,10 @@ namespace SumData
 
         public int Year { get; internal set; }
         public string FileName { get; internal set; }
+
+
+        /// <summary>The folder this row was read from (2026.11)</summary>
+        public string SourceDirectory { get; internal set; }
 
         public override string ToString()
         {
@@ -934,6 +1054,10 @@ namespace SumData
 
         public string ProductName { get; internal set; }
 
+
+
+        /// <summary>The folder this row was read from (2026.11)</summary>
+        public string SourceDirectory { get; internal set; }
 
         public override string ToString()
         {
@@ -994,6 +1118,10 @@ namespace SumData
         public byte? CoresPerPhysicalProcessor { get; internal set; }
         public byte? LogicalProcessorsPerPhysicalProcessor { get; internal set; }
         public long? MaximumMemory { get; internal set; }
+
+
+        /// <summary>The folder this row was read from (2026.11)</summary>
+        public string SourceDirectory { get; internal set; }
 
         public override string ToString()
         {

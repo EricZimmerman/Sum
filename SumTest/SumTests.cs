@@ -106,6 +106,59 @@ public class SumTests
     }
 
     [Test]
+    public void FindsDatabaseDirectoriesRecursivelyAndIgnoringCase()
+    {
+        //Issues #265 (PR #12 by reece394)
+        var systemIdentityDirectory = Directory.CreateDirectory(Path.Combine(_dir, "one", "ual")).FullName;
+        var currentDirectory = Directory.CreateDirectory(Path.Combine(_dir, "two", "ual")).FullName;
+        Directory.CreateDirectory(Path.Combine(_dir, "three"));
+        File.WriteAllBytes(Path.Combine(systemIdentityDirectory, "systemidentity.MDB"), Array.Empty<byte>());
+        File.WriteAllBytes(Path.Combine(currentDirectory, "CURRENT.mdb"), Array.Empty<byte>());
+
+        Sum.FindDatabaseDirectories(_dir).Should().Equal(systemIdentityDirectory, currentDirectory);
+    }
+
+    [Test]
+    public void FindDatabaseDirectoriesNeedsTheDirectory()
+    {
+        var act = () => Sum.FindDatabaseDirectories(Path.Combine(_dir, "missing"));
+        act.Should().Throw<DirectoryNotFoundException>();
+    }
+
+    [Test]
+    public void TheConstructorReadsOnlyItsFolder()
+    {
+        //the 2026.10 API is unchanged: subfolders are for the caller (SumECmd uses FindDatabaseDirectories)
+        StandardFolder();
+        var sub = Directory.CreateDirectory(Path.Combine(_dir, "sub")).FullName;
+        foreach (var file in Directory.GetFiles(_dir))
+        {
+            File.Copy(file, Path.Combine(sub, Path.GetFileName(file)));
+        }
+
+        var sum = new Sum(_dir);
+
+        sum.ProcessedDatabases.Should().OnlyContain(d => Path.GetDirectoryName(d.FileName) == _dir);
+    }
+
+    [Test]
+    public void RowsHaveTheirSourceDirectory()
+    {
+        StandardFolder();
+
+        var sum = new Sum(_dir);
+
+        sum.SystemIdentityInfos.Should().NotBeEmpty().And.OnlyContain(t => t.SourceDirectory == _dir);
+        sum.RoleInfos.Should().NotBeEmpty().And.OnlyContain(t => t.SourceDirectory == _dir);
+        sum.ChainedDbs.Should().NotBeEmpty().And.OnlyContain(t => t.SourceDirectory == _dir);
+        var current = sum.ProcessedDatabases.Single(d => Path.GetFileName(d.FileName) == "Current.mdb");
+        current.Clients.Values.SelectMany(t => t).Should().NotBeEmpty().And.OnlyContain(t => t.SourceDirectory == _dir);
+        current.DnsInfo.Should().OnlyContain(t => t.SourceDirectory == _dir);
+        current.RoleAccesses.Should().OnlyContain(t => t.SourceDirectory == _dir);
+        new ClientEntryDayDetail(current.Clients.Values.First().First(), new DayEntry(1, new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero), 3)).SourceDirectory.Should().Be(_dir);
+    }
+
+    [Test]
     public void CurrentDayDatesUseTheYearOfTheData()
     {
         //they were dated in the year of the machine running SumECmd
