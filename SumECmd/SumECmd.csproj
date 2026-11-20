@@ -16,7 +16,7 @@
     <ApplicationIcon>Calendar52Day.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="System.CommandLine" Version="2.0.13" />
+    <PackageReference Include="System.CommandLine" Version="2.0.14" />
     <ProjectReference Include="..\SumData\SumData.csproj" />
   </ItemGroup>
   <ItemGroup>
