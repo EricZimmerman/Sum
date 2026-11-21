@@ -6,7 +6,7 @@ access counts, DNS and virtual machine information. Results are exported to CSV.
 
 | | |
 |---|---|
-| **Version** | 2026.10.1 |
+| **Version** | 2026.11.0 |
 | **Download** | [.NET 10](https://download.ericzimmermanstools.com/net/SumECmd.zip) (recommended) &middot; [.NET Framework 4.7.2](https://download.ericzimmermanstools.com/SumECmd.zip) |
 | **All tools** | [ericzimmerman.github.io](https://ericzimmerman.github.io) or [Get-ZimmermanTools](https://download.ericzimmermanstools.com/Get-ZimmermanTools.zip), which downloads them all and keeps them current |
 | **Changes** | [ChangeLog](https://ericzimmerman.github.io/changelog/) |
@@ -25,7 +25,7 @@ Usage:
   SumECmd [options]
 
 Options:
-  -d <d>          Directory to process, looking for SystemIdentity.mdb, Current.mdb, etc. Required.
+  -d <d>          Directory to process, looking for SystemIdentity.mdb, Current.mdb, etc. in it and every folder under it (one set of CSVs, SourceDirectory says which folder a row is from). Required.
   --csv <csv>     Directory to save CSV formatted results to. Be sure to include the full path in double quotes
   --wd            Generate CSV with day level details. Default is TRUE
   --dt <dt>       The custom date/time format to use when displaying time stamps. See https://goo.gl/CNVq0k for options [default: yyyy-MM-dd HH:mm:ss]
@@ -47,7 +47,9 @@ SumECmd.exe -d "C:\Temp\sum" --csv "C:\Temp\"
 
 ## Output
 
-Seven CSVs, named `<timestamp>_SumECmd_SUMMARY_<name>_Output.csv` and `<timestamp>_SumECmd_DETAIL_<name>_Output.csv`:
+Seven CSVs, named `<timestamp>_SumECmd_SUMMARY_<name>_Output.csv` and `<timestamp>_SumECmd_DETAIL_<name>_Output.csv`. `-d` is
+searched recursively: every folder in or under it with a `SystemIdentity.mdb` or `Current.mdb` goes into the same CSVs,
+and the last column, `SourceDirectory`, says which folder a row is from:
 
 - `SUMMARY_SystemIdentInfo`: one row per `SYSTEM_IDENTITY` entry: OS version, and (new in 2026.10.0, after the existing
   columns) host and domain name, manufacturer, model, serial numbers, last boot, time zone, processors and memory.
@@ -84,6 +86,12 @@ There is no need to repair anything by hand any more. `esentutl.exe /mh <dbname>
 |---|---|
 | `0` | Success. Databases that are damaged or missing from the `-d` folder are reported but are not a failure |
 | `1` | The tool failed: invalid arguments, a missing `-d` folder, a database it can't read (access denied, locked), a `--temp` folder that can't be written to, an export that failed, or a system other than Windows |
+
+## What's new in 2026.11
+
+- `-d` is searched recursively: every folder with a `SystemIdentity.mdb` or `Current.mdb` under it is read with its
+  chained databases, and all of them go into one set of CSVs with a new last column, `SourceDirectory` (Issues #265,
+  PR #12 by reece394).
 
 ## What's new in 2026.10
 
