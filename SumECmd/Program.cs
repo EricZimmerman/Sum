@@ -374,7 +374,7 @@ internal class Program
         return exportFailed || failed ? 1 : 0;
     }
 
-    private static CsvWriter GetCsvWriter(string tableName, string csv)
+    private static CsvWriter GetCsvWriter<T>(string tableName, string csv, CsvRecordWriter<T> recordWriter)
     {
         var outName = $"{_timestamp:yyyyMMddHHmmss}_SumECmd_DETAIL_{tableName}_Output.csv";
 
@@ -382,11 +382,11 @@ internal class Program
 
         Log.Debug("Setting up {TableName} output file: '{OutFile}'",tableName,outFile);
 
-        var swCsv = new StreamWriter(outFile, false, Encoding.UTF8);
+        //the record writer of this CSV's type, which WriteHeader and WriteRecord use
+        CsvRecordWriter.Register<T>(_ => recordWriter);
 
-        var csvWriter = new CsvWriter(swCsv, CultureInfo.InvariantCulture);
-
-        return csvWriter;
+        //the same output as CsvHelper 33, UTF-8 with a BOM
+        return CsvWriter.ToFile(outFile, CsvOutput.Options with { WriteByteOrderMark = true });
     }
 
     private static void ExportProcessedDetails(List<Sum> sums,string csv, string dt, bool wd)
@@ -409,27 +409,14 @@ internal class Program
                     {
                         if (csvWriterClients == null)
                         {
-                            csvWriterClients = GetCsvWriter("Clients",csv);
-
-                            var mapClient = csvWriterClients.Context.AutoMap<ClientEntry>();
-                            mapClient.Map(t => t.InsertDate).Convert(t => $"{t.Value.InsertDate.ToString(dt)}");
-                            mapClient.Map(t => t.LastAccess).Convert(t => $"{t.Value.LastAccess.ToString(dt)}");
-                            csvWriterClients.Context.RegisterClassMap(mapClient);
+                            csvWriterClients = GetCsvWriter("Clients",csv,SumCsv.Client(dt));
                             csvWriterClients.WriteHeader<ClientEntry>();
-                            csvWriterClients.NextRecord();
                         }
 
                         if (wd && csvWriterClientsDetail == null)
                         {
-                            csvWriterClientsDetail = GetCsvWriter("ClientsDetailed",csv);
-
-                            var mapClient = csvWriterClientsDetail.Context.AutoMap<ClientEntryDayDetail>();
-                            mapClient.Map(t => t.InsertDate).Convert(t => $"{t.Value.InsertDate.ToString(dt)}");
-                            mapClient.Map(t => t.LastAccess).Convert(t => $"{t.Value.LastAccess.ToString(dt)}");
-                            mapClient.Map(t => t.Date).Convert(t => $"{t.Value.Date:yyyy-MM-dd}");
-                            csvWriterClientsDetail.Context.RegisterClassMap(mapClient);
+                            csvWriterClientsDetail = GetCsvWriter("ClientsDetailed",csv,SumCsv.ClientDetail(dt));
                             csvWriterClientsDetail.WriteHeader<ClientEntryDayDetail>();
-                            csvWriterClientsDetail.NextRecord();
                         }
 
                         //(SingleOrDefault threw for a role listed twice)
@@ -446,12 +433,10 @@ internal class Program
                             {
                                 var clientEntryDayDetail = new ClientEntryDayDetail(clientEntry, dayEntry);
                                 csvWriterClientsDetail.WriteRecord(clientEntryDayDetail);
-                                csvWriterClientsDetail.NextRecord();
                             }
                         }
 
                         csvWriterClients.WriteRecord(clientEntry);
-                        csvWriterClients.NextRecord();
                     }
                 }
 
@@ -463,18 +448,12 @@ internal class Program
                 {
                     if (csvWriterDns == null)
                     {
-                        csvWriterDns = GetCsvWriter("DnsInfo",csv);
-
-                        var mapDns = csvWriterDns.Context.AutoMap<DnsEntry>();
-                        mapDns.Map(t => t.LastSeen).Convert(t => $"{t.Value.LastSeen.ToString(dt)}");
-                        csvWriterDns.Context.RegisterClassMap(mapDns);
+                        csvWriterDns = GetCsvWriter("DnsInfo",csv,SumCsv.Dns(dt));
                         csvWriterDns.WriteHeader<DnsEntry>();
-                        csvWriterDns.NextRecord();
                     }
 
                     dnsEntry.SourceFile = Path.GetFileName(sdProcessedDatabase.FileName);
                     csvWriterDns.WriteRecord(dnsEntry);
-                    csvWriterDns.NextRecord();
                 }
 
                 if (sdProcessedDatabase.RoleAccesses.Any())
@@ -485,14 +464,8 @@ internal class Program
                 {
                     if (csvWriterRoles == null)
                     {
-                        csvWriterRoles = GetCsvWriter("RoleAccesses",csv);
-
-                        var mapRole = csvWriterRoles.Context.AutoMap<RoleAccessEntry>();
-                        mapRole.Map(t => t.FirstSeen).Convert(t => $"{t.Value.FirstSeen.ToString(dt)}");
-                        mapRole.Map(t => t.LastSeen).Convert(t => $"{t.Value.LastSeen.ToString(dt)}");
-                        csvWriterRoles.Context.RegisterClassMap(mapRole);
+                        csvWriterRoles = GetCsvWriter("RoleAccesses",csv,SumCsv.RoleAccess(dt));
                         csvWriterRoles.WriteHeader<RoleAccessEntry>();
-                        csvWriterRoles.NextRecord();
                     }
                     roleAccess.SourceFile = Path.GetFileName(sdProcessedDatabase.FileName);
 
@@ -501,7 +474,6 @@ internal class Program
                     roleAccess.RoleDescription = roleDesc != null ? roleDesc.RoleName : "(Unknown Role Guid)";
 
                     csvWriterRoles.WriteRecord(roleAccess);
-                    csvWriterRoles.NextRecord();
                 }
 
                 if (sdProcessedDatabase.VmInfo.Any())
@@ -512,17 +484,11 @@ internal class Program
                 {
                     if (csvWriterVm == null)
                     {
-                        csvWriterVm = GetCsvWriter("VmInfo",csv);
-                        var mapVm = csvWriterVm.Context.AutoMap<VmEntry>();
-                        mapVm.Map(t => t.CreationTime).Convert(t => $"{t.Value.CreationTime.ToString(dt)}");
-                        mapVm.Map(t => t.LastSeenActive).Convert(t => $"{t.Value.LastSeenActive.ToString(dt)}");
-                        csvWriterVm.Context.RegisterClassMap(mapVm);
+                        csvWriterVm = GetCsvWriter("VmInfo",csv,SumCsv.Vm(dt));
                         csvWriterVm.WriteHeader<VmEntry>();
-                        csvWriterVm.NextRecord();
                     }
                     vm.SourceFile = Path.GetFileName(sdProcessedDatabase.FileName);
                     csvWriterVm.WriteRecord(vm);
-                    csvWriterVm.NextRecord();
                 }
 
                 Log.Information("-----------------------------------------------------------------------------------------------------");
@@ -539,29 +505,29 @@ internal class Program
 
             if (csvWriterClients != null)
             {
-                Log.Information("Found {Rows:N0} Client entries",csvWriterClients.Row - 2);
+                Log.Information("Found {Rows:N0} Client entries",csvWriterClients.RecordCount - 1);
             }
 
             if (csvWriterClientsDetail != null)
             {
-                Log.Information("Found {Rows:N0} Client detail entries",csvWriterClientsDetail.Row - 2);
+                Log.Information("Found {Rows:N0} Client detail entries",csvWriterClientsDetail.RecordCount - 1);
             }
 
             if (csvWriterDns != null)
             {
-                Log.Information("Found {Rows:N0} DNS entries",csvWriterDns.Row - 2);
+                Log.Information("Found {Rows:N0} DNS entries",csvWriterDns.RecordCount - 1);
             }
 
 
             if (csvWriterRoles != null)
             {
-                Log.Information("Found {Rows:N0} Role entries",csvWriterRoles.Row - 2);
+                Log.Information("Found {Rows:N0} Role entries",csvWriterRoles.RecordCount - 1);
             }
 
 
             if (csvWriterVm != null)
             {
-                Log.Information("Found {Rows:N0} VM entries",csvWriterVm.Row - 2);
+                Log.Information("Found {Rows:N0} VM entries",csvWriterVm.RecordCount - 1);
             }
         }
         finally
@@ -577,7 +543,7 @@ internal class Program
     /// <summary>
     ///     One summary CSV (written even when it has no rows, as before)
     /// </summary>
-    private static bool ExportSummary<T>(IEnumerable<T> records, string csv, string name, Action<CsvHelper.Configuration.ClassMap<T>> configure = null)
+    private static bool ExportSummary<T>(IEnumerable<T> records, string csv, string name, CsvRecordWriter<T> recordWriter)
     {
         try
         {
@@ -585,18 +551,10 @@ internal class Program
 
             var outFile = Path.Combine(csv, outName);
 
-            using var swCsv = new StreamWriter(outFile, false, Encoding.UTF8);
+            //the same output as CsvHelper 33, UTF-8 with a BOM
+            using var csvWriter = CsvWriter.ToFile(outFile, CsvOutput.Options with { WriteByteOrderMark = true });
 
-            using var csvWriter = new CsvWriter(swCsv, CultureInfo.InvariantCulture);
-
-            var map = csvWriter.Context.AutoMap<T>();
-            configure?.Invoke(map);
-
-            csvWriter.Context.RegisterClassMap(map);
-            csvWriter.WriteHeader<T>();
-            csvWriter.NextRecord();
-
-            csvWriter.WriteRecords(records);
+            csvWriter.WriteRecords(records, recordWriter);
 
             return true;
         }
@@ -610,18 +568,17 @@ internal class Program
 
     private static bool ExportChainedDb(List<Sum> sums, string csv)
     {
-        return ExportSummary(sums.SelectMany(t => t.ChainedDbs), csv, "ChainedDbInfo");
+        return ExportSummary(sums.SelectMany(t => t.ChainedDbs), csv, "ChainedDbInfo", SumCsv.ChainedDbInfo());
     }
 
     private static bool ExportSystemRole(List<Sum> sums, string csv)
     {
-        return ExportSummary(sums.SelectMany(t => t.RoleInfos), csv, "RoleInfos");
+        return ExportSummary(sums.SelectMany(t => t.RoleInfos), csv, "RoleInfos", SumCsv.RoleInfo());
     }
 
     private static bool ExportSystemIdentity(List<Sum> sums, string csv, string dt)
     {
-        return ExportSummary(sums.SelectMany(t => t.SystemIdentityInfos), csv, "SystemIdentInfo",
-            map => map.Map(t => t.CreationTime).Convert(t => $"{t.Value.CreationTime.ToString(dt)}"));
+        return ExportSummary(sums.SelectMany(t => t.SystemIdentityInfos), csv, "SystemIdentInfo", SumCsv.SystemIdentInfo(dt));
     }
 
     private class CustomHelpAction : SynchronousCommandLineAction
